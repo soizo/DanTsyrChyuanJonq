@@ -1,11 +1,258 @@
+// Version Control System
+class VersionControl {
+    constructor(maxVersions = 50) {
+        this.versions = [];
+        this.currentIndex = -1;
+        this.maxVersions = maxVersions;
+        this.loadHistory();
+    }
+
+    // Generate unique ID
+    generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).slice(2);
+    }
+
+    // Load version history from localStorage
+    loadHistory() {
+        try {
+            const savedVersions = localStorage.getItem('wordMemoryVersions');
+            const savedIndex = localStorage.getItem('wordMemoryVersionIndex');
+            const savedSettings = localStorage.getItem('wordMemorySettings');
+
+            if (savedVersions) {
+                this.versions = JSON.parse(savedVersions);
+            }
+
+            if (savedIndex !== null) {
+                this.currentIndex = parseInt(savedIndex, 10);
+            }
+
+            if (savedSettings) {
+                const settings = JSON.parse(savedSettings);
+                this.maxVersions = settings.maxVersions || 50;
+            }
+        } catch (error) {
+            console.error('Failed to load version history:', error);
+            this.versions = [];
+            this.currentIndex = -1;
+        }
+    }
+
+    // Save version history to localStorage
+    saveHistory() {
+        try {
+            localStorage.setItem('wordMemoryVersions', JSON.stringify(this.versions));
+            localStorage.setItem('wordMemoryVersionIndex', this.currentIndex.toString());
+        } catch (error) {
+            console.error('Failed to save version history:', error);
+            // If localStorage is full, try to remove old versions
+            if (error.name === 'QuotaExceededError') {
+                this.removeOldVersions(Math.floor(this.maxVersions / 2));
+                try {
+                    localStorage.setItem('wordMemoryVersions', JSON.stringify(this.versions));
+                    localStorage.setItem('wordMemoryVersionIndex', this.currentIndex.toString());
+                } catch (e) {
+                    console.error('Still failed after removing old versions:', e);
+                }
+            }
+        }
+    }
+
+    // Create a new version
+    createVersion(data, description = 'Manual save') {
+        // If we're not at the latest version, remove all versions after current
+        if (this.currentIndex < this.versions.length - 1) {
+            this.versions = this.versions.slice(0, this.currentIndex + 1);
+        }
+
+        // Create new version
+        const version = {
+            id: this.generateId(),
+            timestamp: new Date().toISOString(),
+            data: JSON.parse(JSON.stringify(data)), // Deep copy
+            description: description,
+            wordCount: data.length
+        };
+
+        this.versions.push(version);
+        this.currentIndex = this.versions.length - 1;
+
+        // Limit number of versions
+        if (this.versions.length > this.maxVersions) {
+            this.removeOldVersions(1);
+        }
+
+        this.saveHistory();
+        return version;
+    }
+
+    // Remove old versions
+    removeOldVersions(count) {
+        if (this.versions.length <= 1) return;
+
+        const toRemove = Math.min(count, this.versions.length - 1);
+        this.versions.splice(0, toRemove);
+        this.currentIndex = Math.max(0, this.currentIndex - toRemove);
+    }
+
+    // Undo - go to previous version
+    undo() {
+        if (!this.canUndo()) {
+            return null;
+        }
+
+        this.currentIndex--;
+        this.saveHistory();
+        return this.getCurrentVersion();
+    }
+
+    // Redo - go to next version
+    redo() {
+        if (!this.canRedo()) {
+            return null;
+        }
+
+        this.currentIndex++;
+        this.saveHistory();
+        return this.getCurrentVersion();
+    }
+
+    // Check if can undo
+    canUndo() {
+        return this.currentIndex > 0;
+    }
+
+    // Check if can redo
+    canRedo() {
+        return this.currentIndex < this.versions.length - 1;
+    }
+
+    // Get current version
+    getCurrentVersion() {
+        if (this.currentIndex >= 0 && this.currentIndex < this.versions.length) {
+            return this.versions[this.currentIndex];
+        }
+        return null;
+    }
+
+    // Go to specific version
+    goToVersion(index) {
+        if (index >= 0 && index < this.versions.length) {
+            this.currentIndex = index;
+            this.saveHistory();
+            return this.versions[index];
+        }
+        return null;
+    }
+
+    // Get version history
+    getHistory() {
+        return {
+            versions: this.versions,
+            currentIndex: this.currentIndex,
+            canUndo: this.canUndo(),
+            canRedo: this.canRedo()
+        };
+    }
+
+    // Clear all history
+    clearHistory() {
+        this.versions = [];
+        this.currentIndex = -1;
+        this.saveHistory();
+    }
+
+    // Update settings
+    updateSettings(settings) {
+        if (settings.maxVersions) {
+            this.maxVersions = settings.maxVersions;
+            localStorage.setItem('wordMemorySettings', JSON.stringify({ maxVersions: this.maxVersions }));
+
+            // Trim versions if needed
+            if (this.versions.length > this.maxVersions) {
+                this.removeOldVersions(this.versions.length - this.maxVersions);
+            }
+        }
+    }
+
+    // Get settings
+    getSettings() {
+        return {
+            maxVersions: this.maxVersions
+        };
+    }
+}
+
 // Data storage
 let words = [];
 let isFullMode = false;
 let editingIndex = -1;
 let selectedWords = new Set();
 let isSelectMode = false;
+let versionControl = null;
 
 const SPEAKER_ICON_SVG = '<svg class="icon-speaker" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 10v4c0 1.1.9 2 2 2h2.35l3.38 2.7c.93.74 2.27.08 2.27-1.1V6.4c0-1.18-1.34-1.84-2.27-1.1L7.35 8H5c-1.1 0-2 .9-2 2Zm14.5 2c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03ZM15 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/></svg>';
+
+// Dropdown Base Class
+class Dropdown {
+    constructor(containerId, selectedId, dropdownId) {
+        this.container = document.getElementById(containerId);
+        this.selected = document.getElementById(selectedId);
+        this.dropdown = document.getElementById(dropdownId);
+        this.isOpen = false;
+
+        // Check if all elements exist
+        if (!this.container || !this.selected || !this.dropdown) {
+            console.warn(`Dropdown initialization failed: ${containerId}, ${selectedId}, ${dropdownId}`);
+            return;
+        }
+
+        if (this.selected) {
+            this.selected.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggle();
+            });
+        }
+    }
+
+    toggle() {
+        if (!this.dropdown || !this.container) return;
+
+        this.isOpen = !this.isOpen;
+        this.dropdown.classList.toggle('active', this.isOpen);
+        this.container.classList.toggle('open', this.isOpen);
+
+        if (this.isOpen) {
+            Dropdown.closeAll(this);
+        }
+    }
+
+    close() {
+        if (!this.dropdown || !this.container) return;
+
+        if (this.isOpen) {
+            this.isOpen = false;
+            this.dropdown.classList.remove('active');
+            this.container.classList.remove('open');
+        }
+    }
+
+    static instances = [];
+
+    static register(instance) {
+        if (instance.container && instance.selected && instance.dropdown) {
+            Dropdown.instances.push(instance);
+        }
+    }
+
+    static closeAll(except = null) {
+        Dropdown.instances.forEach(instance => {
+            if (instance !== except) {
+                instance.close();
+            }
+        });
+    }
+}
 
 function getWeightLabel(weight) {
     const name = weight === -3 ? 'Invalid' :
@@ -38,6 +285,17 @@ function showStatus(message, type = 'info') {
 // Initialize
 window.onload = function() {
     loadData();
+
+    // Initialize version control
+    versionControl = new VersionControl(50);
+
+    // Create initial version if no versions exist
+    if (versionControl.versions.length === 0 && words.length > 0) {
+        versionControl.createVersion(words, 'Initial version');
+    } else if (versionControl.versions.length === 0 && words.length === 0) {
+        versionControl.createVersion([], 'Initial empty state');
+    }
+
     renderWords();
     updateWeightSelection();
     updateEditWeightSelection();
@@ -53,6 +311,20 @@ window.onload = function() {
             speechSynthesis.getVoices();
         };
     }
+
+    // Initialize dropdown instances
+    posDropdown = new Dropdown('posSelector', 'posSelected', 'posDropdown');
+    weightDropdown = new Dropdown('weightSelector', 'weightSelected', 'weightDropdown');
+    editPosDropdown = new Dropdown('editPosSelector', 'editPosSelected', 'editPosDropdown');
+    editWeightDropdown = new Dropdown('editWeightSelector', 'editWeightSelected', 'editWeightDropdown');
+
+    Dropdown.register(posDropdown);
+    Dropdown.register(weightDropdown);
+    Dropdown.register(editPosDropdown);
+    Dropdown.register(editWeightDropdown);
+
+    // Initialize batch toolbar
+    updateBatchToolbar();
 };
 
 // Mode toggle
@@ -78,10 +350,16 @@ let selectedPos = [];
 let selectedWeight = 3;
 let editSelectedWeight = 3;
 
+// Dropdown instances
+let posDropdown = null;
+let weightDropdown = null;
+let editPosDropdown = null;
+let editWeightDropdown = null;
+
 function togglePosDropdown() {
-    const dropdown = document.getElementById('posDropdown');
-    dropdown.classList.toggle('active');
-    dropdown.closest('.pos-selector').classList.toggle('open', dropdown.classList.contains('active'));
+    if (posDropdown) {
+        posDropdown.toggle();
+    }
 }
 
 function renderPosSelection(containerId, values) {
@@ -105,7 +383,11 @@ function updatePosSelection() {
     syncPosOptionState('posDropdown', selectedPos);
 }
 
-function togglePosOption(option) {
+function togglePosOption(option, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+
     const value = option.dataset.value;
     if (!value) return;
 
@@ -122,9 +404,9 @@ function togglePosOption(option) {
 let editSelectedPos = [];
 
 function toggleEditPosDropdown() {
-    const dropdown = document.getElementById('editPosDropdown');
-    dropdown.classList.toggle('active');
-    dropdown.closest('.pos-selector').classList.toggle('open', dropdown.classList.contains('active'));
+    if (editPosDropdown) {
+        editPosDropdown.toggle();
+    }
 }
 
 function updateEditPosSelection() {
@@ -132,7 +414,11 @@ function updateEditPosSelection() {
     syncPosOptionState('editPosDropdown', editSelectedPos);
 }
 
-function toggleEditPosOption(option) {
+function toggleEditPosOption(option, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+
     const value = option.dataset.value;
     if (!value) return;
 
@@ -163,52 +449,62 @@ function updateEditWeightSelection() {
 }
 
 function toggleWeightDropdown() {
-    const dropdown = document.getElementById('weightDropdown');
-    dropdown.classList.toggle('active');
-    dropdown.closest('.weight-selector').classList.toggle('open', dropdown.classList.contains('active'));
+    if (weightDropdown) {
+        weightDropdown.toggle();
+    }
 }
 
 function toggleEditWeightDropdown() {
-    const dropdown = document.getElementById('editWeightDropdown');
-    dropdown.classList.toggle('active');
-    dropdown.closest('.weight-selector').classList.toggle('open', dropdown.classList.contains('active'));
+    if (editWeightDropdown) {
+        editWeightDropdown.toggle();
+    }
 }
 
-function setWeightOption(option) {
+function setWeightOption(option, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+
     const value = parseInt(option.dataset.value, 10);
     if (Number.isNaN(value)) return;
     selectedWeight = value;
     updateWeightSelection();
-    const dropdown = document.getElementById('weightDropdown');
-    dropdown.classList.remove('active');
-    dropdown.closest('.weight-selector').classList.remove('open');
+    if (weightDropdown) {
+        weightDropdown.close();
+    }
 }
 
-function setEditWeightOption(option) {
+function setEditWeightOption(option, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+
     const value = parseInt(option.dataset.value, 10);
     if (Number.isNaN(value)) return;
     editSelectedWeight = value;
     updateEditWeightSelection();
-    const dropdown = document.getElementById('editWeightDropdown');
-    dropdown.classList.remove('active');
-    dropdown.closest('.weight-selector').classList.remove('open');
+    if (editWeightDropdown) {
+        editWeightDropdown.close();
+    }
 }
 
 // Close dropdowns when clicking outside
 document.addEventListener('click', function(e) {
-    if (!e.target.closest('.pos-selector')) {
-        document.querySelectorAll('.pos-dropdown').forEach(d => {
-            d.classList.remove('active');
-            d.closest('.pos-selector').classList.remove('open');
-        });
+    // Check if any dropdown is open
+    const hasOpenDropdown = Dropdown.instances.some(d => d.isOpen);
+
+    if (hasOpenDropdown) {
+        // Check if click is inside any dropdown container
+        const clickedInsideDropdown = e.target.closest('.dropdown-container');
+
+        if (!clickedInsideDropdown) {
+            // Click is outside all dropdowns, close them and prevent other actions
+            e.stopPropagation();
+            e.preventDefault();
+            Dropdown.closeAll();
+        }
     }
-    if (!e.target.closest('.weight-selector')) {
-        document.querySelectorAll('.weight-dropdown').forEach(d => {
-            d.classList.remove('active');
-            d.closest('.weight-selector').classList.remove('open');
-        });
-    }
-});
+}, true); // Use capture phase to handle this before other handlers
 
 // Add word
 function addWord() {
@@ -231,9 +527,9 @@ function addWord() {
     };
 
     words.push(newWord);
-    saveData();
+    saveData(false, `Added word "${word}"`);
     renderWords();
-    showStatus(`✓ Added "${word}"`, 'success');
+    showStatus(`Added "${word}"`, 'success');
 
     // Clear form
     document.getElementById('wordInput').value = '';
@@ -249,13 +545,14 @@ function addWord() {
 // Update weight
 function updateWeight(index, delta) {
     const currentWeight = words[index].weight;
+    const wordName = words[index].word;
 
     // If current weight is -3 (invalid), delta is the new weight directly
     if (currentWeight === -3) {
         words[index].weight = delta;
-        saveData();
+        saveData(false, `Fixed weight for "${wordName}"`);
         renderWords();
-        showStatus(`✓ Fixed weight to ${delta}`, 'success');
+        showStatus(`Fixed weight to ${delta}`, 'success');
         return;
     }
 
@@ -266,17 +563,18 @@ function updateWeight(index, delta) {
     }
 
     words[index].weight = newWeight;
-    saveData();
+    saveData(false, `Updated weight for "${wordName}"`);
     renderWords();
 }
 
 // Delete word
 function deleteWord(index) {
-    if (confirm(`Delete "${words[index].word}"?`)) {
+    const wordName = words[index].word;
+    if (confirm(`Delete "${wordName}"?`)) {
         words.splice(index, 1);
-        saveData();
+        saveData(false, `Deleted word "${wordName}"`);
         renderWords();
-        showStatus('✓ Word deleted', 'success');
+        showStatus('Word deleted', 'success');
     }
 }
 
@@ -287,50 +585,140 @@ function toggleWordSelection(index) {
     } else {
         selectedWords.add(index);
     }
-    updateBatchDeleteButton();
+    updateBatchToolbar();
     updateWordSelectionUI();
 }
 
 // Toggle select mode
 function toggleSelectMode() {
-    if (isSelectMode && selectedWords.size > 0) {
-        // If in select mode and have selections, perform batch delete
-        batchDeleteConfirm();
-    } else {
-        // Toggle select mode
-        isSelectMode = !isSelectMode;
-        if (!isSelectMode) {
-            selectedWords.clear();
-        }
-        renderWords();
+    isSelectMode = !isSelectMode;
+    if (!isSelectMode) {
+        selectedWords.clear();
+    }
+    renderWords();
+    updateBatchToolbar();
+}
+
+// Update batch toolbar and buttons
+function updateBatchToolbar() {
+    const toolbar = document.getElementById('batchToolbar');
+    const selectModeBtn = document.getElementById('selectModeBtn');
+    const batchUpBtn = document.getElementById('batchUpBtn');
+    const batchDownBtn = document.getElementById('batchDownBtn');
+    const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+
+    if (toolbar) {
+        toolbar.style.display = isSelectMode ? 'flex' : 'none';
+    }
+
+    if (selectModeBtn) {
+        selectModeBtn.textContent = isSelectMode ? 'Cancel Selection' : 'Select Words';
+    }
+
+    const hasSelection = selectedWords.size > 0;
+    if (batchUpBtn) batchUpBtn.disabled = !hasSelection;
+    if (batchDownBtn) batchDownBtn.disabled = !hasSelection;
+    if (batchDeleteBtn) {
+        batchDeleteBtn.disabled = !hasSelection;
+        batchDeleteBtn.textContent = hasSelection ? `Delete (${selectedWords.size})` : 'Delete';
     }
 }
 
-// Update batch delete button
-function updateBatchDeleteButton() {
-    const btn = document.getElementById('batchDeleteBtn');
-    if (btn) {
-        if (isSelectMode) {
-            if (selectedWords.size > 0) {
-                btn.textContent = `Delete ${selectedWords.size} Selected`;
-                btn.classList.add('btn-delete-mode');
-            } else {
-                btn.textContent = 'Cancel';
-                btn.classList.remove('btn-delete-mode');
-            }
+// Select all words
+function selectAll() {
+    const filteredWords = words.filter(w => {
+        if (isFullMode) {
+            return w.weight >= -3;
         } else {
-            btn.textContent = 'Select Words';
-            btn.classList.remove('btn-delete-mode');
+            return w.weight >= 0;
         }
-        btn.disabled = false;
+    });
+
+    filteredWords.forEach(w => {
+        const index = words.indexOf(w);
+        selectedWords.add(index);
+    });
+
+    updateBatchToolbar();
+    updateWordSelectionUI();
+}
+
+// Deselect all words
+function selectNone() {
+    selectedWords.clear();
+    updateBatchToolbar();
+    updateWordSelectionUI();
+}
+
+// Invert selection
+function selectInvert() {
+    const filteredWords = words.filter(w => {
+        if (isFullMode) {
+            return w.weight >= -3;
+        } else {
+            return w.weight >= 0;
+        }
+    });
+
+    const newSelection = new Set();
+    filteredWords.forEach(w => {
+        const index = words.indexOf(w);
+        if (!selectedWords.has(index)) {
+            newSelection.add(index);
+        }
+    });
+
+    selectedWords = newSelection;
+    updateBatchToolbar();
+    updateWordSelectionUI();
+}
+
+// Select by weight range
+function selectByWeight(minWeight, maxWeight) {
+    selectedWords.clear();
+
+    words.forEach((w, index) => {
+        if (w.weight >= minWeight && w.weight <= maxWeight) {
+            selectedWords.add(index);
+        }
+    });
+
+    updateBatchToolbar();
+    updateWordSelectionUI();
+}
+
+// Batch adjust weight
+function batchAdjustWeight(delta) {
+    if (selectedWords.size === 0) return;
+
+    const count = selectedWords.size;
+    const action = delta > 0 ? 'increased' : 'decreased';
+
+    if (confirm(`${delta > 0 ? 'increase' : 'decrease'} weight for ${count} selected word(s)?`)) {
+        selectedWords.forEach(index => {
+            const currentWeight = words[index].weight;
+            const newWeight = currentWeight + delta;
+
+            // Don't go below -2 or above 10
+            if (newWeight >= -2 && newWeight <= 10) {
+                words[index].weight = newWeight;
+            }
+        });
+
+        saveData(false, `Weight ${action} for ${count} word(s)`);
+        renderWords();
+        showStatus(`Weight adjusted for ${count} word(s)`, 'success');
     }
 }
 
 // Update word selection UI
 function updateWordSelectionUI() {
-    selectedWords.forEach(index => {
+    // Update all checkboxes
+    words.forEach((_, index) => {
         const checkbox = document.getElementById(`select-${index}`);
-        if (checkbox) checkbox.checked = true;
+        if (checkbox) {
+            checkbox.checked = selectedWords.has(index);
+        }
     });
 }
 
@@ -345,10 +733,10 @@ function batchDeleteConfirm() {
             words.splice(index, 1);
         });
         selectedWords.clear();
-        isSelectMode = false;
-        saveData();
+        saveData(false, `Deleted ${count} word(s)`);
         renderWords();
-        showStatus(`✓ Deleted ${count} word(s)`, 'success');
+        updateBatchToolbar();
+        showStatus(`Deleted ${count} word(s)`, 'success');
     }
 }
 
@@ -364,7 +752,7 @@ async function pronounceWord(word) {
             if (audioUrl) {
                 const audio = new Audio(audioUrl);
                 audio.play();
-                showStatus(`🔊 Playing "${word}"`, 'info');
+                showStatus(`Playing "${word}"`, 'info');
                 return;
             }
         }
@@ -389,9 +777,9 @@ async function pronounceWord(word) {
         }
 
         speechSynthesis.speak(utterance);
-        showStatus(`🔊 Pronouncing "${word}"`, 'info');
+        showStatus(`Pronouncing "${word}"`, 'info');
     } else {
-        showStatus('✗ Pronunciation not supported', 'error');
+        showStatus('Pronunciation not supported', 'error');
     }
 }
 
@@ -436,6 +824,8 @@ function saveEdit() {
         return;
     }
 
+    const oldWord = words[editingIndex].word;
+
     words[editingIndex] = {
         word: word.toLowerCase(),
         meaning: meaning,
@@ -444,7 +834,7 @@ function saveEdit() {
         added: date
     };
 
-    saveData();
+    saveData(false, `Edited word "${oldWord}"`);
     renderWords();
     closeEditModal();
 }
@@ -562,7 +952,7 @@ function renderWords() {
     });
 
     container.innerHTML = html;
-    updateBatchDeleteButton();
+    updateBatchToolbar();
 }
 
 // Toggle collapse
@@ -580,17 +970,23 @@ function toggleCollapse(header) {
 }
 
 // Data persistence
-function saveData(showMessage = false) {
+function saveData(showMessage = false, description = null) {
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
+
+    // Create version if description is provided
+    if (description && versionControl) {
+        versionControl.createVersion(words, description);
+    }
+
     if (showMessage) {
-        showStatus('✓ Auto-saved to localStorage', 'success');
+        showStatus('Auto-saved to localStorage', 'success');
     }
 }
 
 // Manual save
 function manualSave() {
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
-    showStatus(`✓ Manually saved ${words.length} words`, 'success');
+    showStatus(`Manually saved ${words.length} words`, 'success');
 }
 
 function loadData() {
@@ -674,20 +1070,25 @@ function importData(event) {
                         };
                     });
 
-                    saveData();
+                    // Clear version history and create new initial version
+                    if (versionControl) {
+                        versionControl.clearHistory();
+                    }
+
+                    saveData(false, `Imported ${imported.length} word(s)`);
                     renderWords();
 
                     if (invalidCount > 0) {
-                        showStatus(`✓ Imported ${validCount} valid, ${invalidCount} invalid words`, 'success');
+                        showStatus(`Imported ${validCount} valid, ${invalidCount} invalid words`, 'success');
                     } else {
-                        showStatus(`✓ Imported ${imported.length} words`, 'success');
+                        showStatus(`Imported ${imported.length} words`, 'success');
                     }
                 }
             } else {
-                showStatus('✗ Invalid file format', 'error');
+                showStatus('Invalid file format', 'error');
             }
         } catch (error) {
-            showStatus('✗ Failed to parse file', 'error');
+            showStatus('Failed to parse file', 'error');
         }
         event.target.value = '';
     };
@@ -700,4 +1101,186 @@ document.getElementById('wordInput').addEventListener('keypress', function(e) {
 });
 document.getElementById('meaningInput').addEventListener('keypress', function(e) {
     if (e.key === 'Enter') addWord();
+});
+
+// Undo/Redo functions
+function performUndo() {
+    if (!versionControl) {
+        showStatus('Version control not initialized', 'error');
+        return;
+    }
+
+    if (!versionControl.canUndo()) {
+        showStatus('Nothing to undo', 'info');
+        return;
+    }
+
+    const version = versionControl.undo();
+    if (version) {
+        words = JSON.parse(JSON.stringify(version.data)); // Deep copy
+        localStorage.setItem('wordMemoryData', JSON.stringify(words));
+        renderWords();
+        showStatus(`Undo: ${version.description}`, 'success');
+    }
+}
+
+function performRedo() {
+    if (!versionControl) {
+        showStatus('Version control not initialized', 'error');
+        return;
+    }
+
+    if (!versionControl.canRedo()) {
+        showStatus('Nothing to redo', 'info');
+        return;
+    }
+
+    const version = versionControl.redo();
+    if (version) {
+        words = JSON.parse(JSON.stringify(version.data)); // Deep copy
+        localStorage.setItem('wordMemoryData', JSON.stringify(words));
+        renderWords();
+        showStatus(`Redo: ${version.description}`, 'success');
+    }
+}
+
+// Keyboard shortcuts for Undo/Redo
+document.addEventListener('keydown', function(e) {
+    // Check if any input field is focused
+    const activeElement = document.activeElement;
+    const isInputFocused = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        activeElement.isContentEditable
+    );
+
+    // Don't intercept shortcuts when typing in input fields
+    if (isInputFocused) {
+        return;
+    }
+
+    // Cmd+Z (Mac) or Ctrl+Z (Windows/Linux) - Undo
+    if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        performUndo();
+    }
+
+    // Cmd+Y (Mac) or Ctrl+Y (Windows/Linux) - Redo
+    // Cmd+Shift+Z (Mac) or Ctrl+Shift+Z (Windows/Linux) - Redo
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+        e.preventDefault();
+        performRedo();
+    }
+});
+
+// Settings functions
+function openSettingsModal() {
+    if (!versionControl) return;
+
+    const settings = versionControl.getSettings();
+    document.getElementById('maxVersionsInput').value = settings.maxVersions;
+    document.getElementById('settingsModal').classList.add('active');
+}
+
+function closeSettingsModal() {
+    document.getElementById('settingsModal').classList.remove('active');
+}
+
+function saveSettings() {
+    if (!versionControl) return;
+
+    const maxVersions = parseInt(document.getElementById('maxVersionsInput').value, 10);
+
+    if (isNaN(maxVersions) || maxVersions < 10 || maxVersions > 200) {
+        alert('Max versions must be between 10 and 200');
+        return;
+    }
+
+    versionControl.updateSettings({ maxVersions: maxVersions });
+    showStatus('Settings saved', 'success');
+    closeSettingsModal();
+}
+
+// Version history functions
+function openHistoryModal() {
+    if (!versionControl) return;
+
+    renderVersionHistory();
+    closeSettingsModal();
+    document.getElementById('historyModal').classList.add('active');
+}
+
+function closeHistoryModal() {
+    document.getElementById('historyModal').classList.remove('active');
+}
+
+function renderVersionHistory() {
+    if (!versionControl) return;
+
+    const history = versionControl.getHistory();
+    const container = document.getElementById('historyList');
+
+    // Update version info
+    document.getElementById('currentVersionIndex').textContent = history.currentIndex + 1;
+    document.getElementById('totalVersions').textContent = history.versions.length;
+    document.getElementById('canUndo').textContent = history.canUndo ? 'Yes' : 'No';
+    document.getElementById('canRedo').textContent = history.canRedo ? 'Yes' : 'No';
+
+    if (history.versions.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">—</div><div>No Version History</div></div>';
+        return;
+    }
+
+    let html = '';
+    history.versions.forEach((version, index) => {
+        const isCurrent = index === history.currentIndex;
+        const date = new Date(version.timestamp);
+        const dateStr = date.toLocaleString('en-GB', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        html += `
+            <div class="version-item ${isCurrent ? 'current' : ''}" onclick="goToVersionByIndex(${index})">
+                <div class="version-header">
+                    <span class="version-number">#${index + 1}</span>
+                    <span class="version-date">${dateStr}</span>
+                </div>
+                <div class="version-description">${version.description}</div>
+                <div class="version-meta">${version.wordCount} word(s)${isCurrent ? ' • Current' : ''}</div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+function goToVersionByIndex(index) {
+    if (!versionControl) return;
+
+    const version = versionControl.goToVersion(index);
+    if (version) {
+        words = JSON.parse(JSON.stringify(version.data)); // Deep copy
+        localStorage.setItem('wordMemoryData', JSON.stringify(words));
+        renderWords();
+        renderVersionHistory(); // Update the history display
+        showStatus(`Jumped to version: ${version.description}`, 'success');
+    }
+}
+
+// Close modals on background click
+document.getElementById('settingsModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeSettingsModal();
+    }
+});
+
+document.getElementById('historyModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeHistoryModal();
+    }
 });
