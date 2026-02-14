@@ -14,16 +14,21 @@
 </head>
 <body>
     <div class="container">
-        <h1>Dan Tsyr Chyuan Jonq</h1>
+        <h1>
+            <img src="assets/title.png" alt="單詞權重器">
+        </h1>
 
         <!-- Mode Switch -->
         <div class="mode-switch">
             <label>Daily</label>
-            <div class="toggle" id="modeToggle">
+            <div class="toggle" id="modeToggle" tabindex="0">
                 <div class="toggle-slider"></div>
             </div>
             <label>Full</label>
         </div>
+
+        <!-- Status Indicator -->
+        <div class="status-indicator" id="statusIndicator"></div>
 
         <!-- Add Word Form -->
         <div class="add-form">
@@ -33,25 +38,43 @@
             </div>
             <div class="form-row">
                 <label>Meaning</label>
-                <input type="text" id="meaningInput" required>
+                <input type="text" id="meaningInput">
             </div>
             <div class="form-grid-3">
                 <div class="form-row">
                     <label>POS</label>
-                    <input type="text" id="posInput">
+                    <div class="pos-selector">
+                        <div class="pos-selected" id="posSelected" onclick="togglePosDropdown()">
+                            <span class="pos-placeholder">Select...</span>
+                        </div>
+                        <div class="pos-dropdown" id="posDropdown">
+                            <label class="pos-option" data-value="n" onclick="togglePosOption(this)">n.</label>
+                            <label class="pos-option" data-value="v" onclick="togglePosOption(this)">v.</label>
+                            <label class="pos-option" data-value="adj" onclick="togglePosOption(this)">adj.</label>
+                            <label class="pos-option" data-value="adv" onclick="togglePosOption(this)">adv.</label>
+                            <label class="pos-option" data-value="prep" onclick="togglePosOption(this)">prep.</label>
+                            <label class="pos-option" data-value="conj" onclick="togglePosOption(this)">conj.</label>
+                            <label class="pos-option" data-value="pron" onclick="togglePosOption(this)">pron.</label>
+                        </div>
+                    </div>
                 </div>
                 <div class="form-row">
                     <label>Weight</label>
-                    <select id="weightInput">
-                        <option value="5">[5] Hardest</option>
-                        <option value="4">[4] Hard</option>
-                        <option value="3" selected>[3] Memorise</option>
-                        <option value="2">[2] Normal</option>
-                        <option value="1">[1] Recognise</option>
-                        <option value="0">[0] Basic</option>
-                        <option value="-1">[-1] Mastered</option>
-                        <option value="-2">[-2] Easy</option>
-                    </select>
+                    <div class="weight-selector">
+                        <div class="weight-selected" id="weightSelected" onclick="toggleWeightDropdown()">
+                            3
+                        </div>
+                        <div class="weight-dropdown" id="weightDropdown">
+                            <label class="weight-option" data-value="5" onclick="setWeightOption(this)">5</label>
+                            <label class="weight-option" data-value="4" onclick="setWeightOption(this)">4</label>
+                            <label class="weight-option selected" data-value="3" onclick="setWeightOption(this)">3</label>
+                            <label class="weight-option" data-value="2" onclick="setWeightOption(this)">2</label>
+                            <label class="weight-option" data-value="1" onclick="setWeightOption(this)">1</label>
+                            <label class="weight-option" data-value="0" onclick="setWeightOption(this)">0</label>
+                            <label class="weight-option" data-value="-1" onclick="setWeightOption(this)">-1</label>
+                            <label class="weight-option" data-value="-2" onclick="setWeightOption(this)">-2</label>
+                        </div>
+                    </div>
                 </div>
                 <div class="form-row">
                     <label>Date</label>
@@ -63,8 +86,10 @@
 
         <!-- Data Controls -->
         <div class="data-controls">
+            <button class="btn-secondary" onclick="manualSave()">Save</button>
             <button class="btn-secondary" onclick="exportData()">Export</button>
             <button class="btn-secondary" onclick="document.getElementById('importFile').click()">Import</button>
+            <button class="btn-secondary" id="batchDeleteBtn" onclick="toggleSelectMode()">Select Words</button>
             <input type="file" id="importFile" accept=".json" onchange="importData(event)">
         </div>
 
@@ -87,20 +112,38 @@
             <div class="form-grid-3">
                 <div class="form-row">
                     <label>POS</label>
-                    <input type="text" id="editPosInput">
+                    <div class="pos-selector">
+                        <div class="pos-selected" id="editPosSelected" onclick="toggleEditPosDropdown()">
+                            <span class="pos-placeholder">Select...</span>
+                        </div>
+                        <div class="pos-dropdown" id="editPosDropdown">
+                            <label class="pos-option" data-value="n" onclick="toggleEditPosOption(this)">n.</label>
+                            <label class="pos-option" data-value="v" onclick="toggleEditPosOption(this)">v.</label>
+                            <label class="pos-option" data-value="adj" onclick="toggleEditPosOption(this)">adj.</label>
+                            <label class="pos-option" data-value="adv" onclick="toggleEditPosOption(this)">adv.</label>
+                            <label class="pos-option" data-value="prep" onclick="toggleEditPosOption(this)">prep.</label>
+                            <label class="pos-option" data-value="conj" onclick="toggleEditPosOption(this)">conj.</label>
+                            <label class="pos-option" data-value="pron" onclick="toggleEditPosOption(this)">pron.</label>
+                        </div>
+                    </div>
                 </div>
                 <div class="form-row">
                     <label>Weight</label>
-                    <select id="editWeightInput">
-                        <option value="5">[5] Hardest</option>
-                        <option value="4">[4] Hard</option>
-                        <option value="3">[3] Memorise</option>
-                        <option value="2">[2] Normal</option>
-                        <option value="1">[1] Recognise</option>
-                        <option value="0">[0] Basic</option>
-                        <option value="-1">[-1] Mastered</option>
-                        <option value="-2">[-2] Easy</option>
-                    </select>
+                    <div class="weight-selector">
+                        <div class="weight-selected" id="editWeightSelected" onclick="toggleEditWeightDropdown()">
+                            3
+                        </div>
+                        <div class="weight-dropdown" id="editWeightDropdown">
+                            <label class="weight-option" data-value="5" onclick="setEditWeightOption(this)">5</label>
+                            <label class="weight-option" data-value="4" onclick="setEditWeightOption(this)">4</label>
+                            <label class="weight-option selected" data-value="3" onclick="setEditWeightOption(this)">3</label>
+                            <label class="weight-option" data-value="2" onclick="setEditWeightOption(this)">2</label>
+                            <label class="weight-option" data-value="1" onclick="setEditWeightOption(this)">1</label>
+                            <label class="weight-option" data-value="0" onclick="setEditWeightOption(this)">0</label>
+                            <label class="weight-option" data-value="-1" onclick="setEditWeightOption(this)">-1</label>
+                            <label class="weight-option" data-value="-2" onclick="setEditWeightOption(this)">-2</label>
+                        </div>
+                    </div>
                 </div>
                 <div class="form-row">
                     <label>Date</label>
