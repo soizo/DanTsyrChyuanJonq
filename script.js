@@ -1,8 +1,9 @@
-// Version Control System
+// Tree-based Version Control System
 class VersionControl {
-    constructor(maxVersions = 50) {
-        this.versions = [];
-        this.currentIndex = -1;
+    constructor(maxVersions = 100) {
+        this.versions = new Map();      // Version ID -> Version node mapping
+        this.rootId = null;             // Root version ID
+        this.currentId = null;          // Current version ID
         this.maxVersions = maxVersions;
         this.loadHistory();
     }
@@ -16,41 +17,110 @@ class VersionControl {
     loadHistory() {
         try {
             const savedVersions = localStorage.getItem('wordMemoryVersions');
-            const savedIndex = localStorage.getItem('wordMemoryVersionIndex');
+            const savedMeta = localStorage.getItem('wordMemoryVersionMeta');
             const savedSettings = localStorage.getItem('wordMemorySettings');
 
+            // Check if it's old linear format (array) and migrate
             if (savedVersions) {
-                this.versions = JSON.parse(savedVersions);
+                const parsed = JSON.parse(savedVersions);
+
+                if (Array.isArray(parsed)) {
+                    // Old linear format - migrate to tree structure
+                    console.log('Migrating from linear to tree structure...');
+                    this.migrateFromLinear(parsed);
+                } else {
+                    // New tree format
+                    this.versions = new Map(Object.entries(parsed));
+                }
             }
 
-            if (savedIndex !== null) {
-                this.currentIndex = parseInt(savedIndex, 10);
+            if (savedMeta) {
+                const meta = JSON.parse(savedMeta);
+                this.rootId = meta.rootId;
+                this.currentId = meta.currentId;
             }
 
             if (savedSettings) {
                 const settings = JSON.parse(savedSettings);
-                this.maxVersions = settings.maxVersions || 50;
+                this.maxVersions = settings.maxVersions || 100;
             }
         } catch (error) {
             console.error('Failed to load version history:', error);
-            this.versions = [];
-            this.currentIndex = -1;
+            this.versions = new Map();
+            this.rootId = null;
+            this.currentId = null;
         }
+    }
+
+    // Migrate from old linear format to tree structure
+    migrateFromLinear(linearVersions) {
+        if (linearVersions.length === 0) return;
+
+        // Convert linear array to tree (single branch)
+        let previousId = null;
+
+        for (let i = 0; i < linearVersions.length; i++) {
+            const oldVersion = linearVersions[i];
+            const newId = oldVersion.id || this.generateId();
+
+            const newVersion = {
+                id: newId,
+                parentId: previousId,
+                children: [],
+                timestamp: oldVersion.timestamp,
+                data: oldVersion.data,
+                description: oldVersion.description || 'Version',
+                wordCount: oldVersion.wordCount || (oldVersion.data ? oldVersion.data.length : 0),
+                lastAccessed: oldVersion.timestamp
+            };
+
+            // Add as child of previous version
+            if (previousId) {
+                const parent = this.versions.get(previousId);
+                if (parent) {
+                    parent.children.push(newId);
+                }
+            } else {
+                // First version is root
+                this.rootId = newId;
+            }
+
+            this.versions.set(newId, newVersion);
+            previousId = newId;
+        }
+
+        // Set current to last version
+        this.currentId = previousId;
+
+        // Save migrated data
+        this.saveHistory();
+        console.log(`Migrated ${linearVersions.length} versions to tree structure`);
     }
 
     // Save version history to localStorage
     saveHistory() {
         try {
-            localStorage.setItem('wordMemoryVersions', JSON.stringify(this.versions));
-            localStorage.setItem('wordMemoryVersionIndex', this.currentIndex.toString());
+            // Save versions as object (will be converted to Map on load)
+            const versionsObj = Object.fromEntries(this.versions);
+            localStorage.setItem('wordMemoryVersions', JSON.stringify(versionsObj));
+
+            // Save metadata
+            const meta = {
+                rootId: this.rootId,
+                currentId: this.currentId
+            };
+            localStorage.setItem('wordMemoryVersionMeta', JSON.stringify(meta));
         } catch (error) {
             console.error('Failed to save version history:', error);
             // If localStorage is full, try to remove old versions
             if (error.name === 'QuotaExceededError') {
-                this.removeOldVersions(Math.floor(this.maxVersions / 2));
+                const toRemove = Math.max(10, Math.floor(this.maxVersions / 4));
+                this.pruneOldVersions(toRemove);
                 try {
-                    localStorage.setItem('wordMemoryVersions', JSON.stringify(this.versions));
-                    localStorage.setItem('wordMemoryVersionIndex', this.currentIndex.toString());
+                    const versionsObj = Object.fromEntries(this.versions);
+                    localStorage.setItem('wordMemoryVersions', JSON.stringify(versionsObj));
+                    const meta = { rootId: this.rootId, currentId: this.currentId };
+                    localStorage.setItem('wordMemoryVersionMeta', JSON.stringify(meta));
                 } catch (e) {
                     console.error('Still failed after removing old versions:', e);
                 }
@@ -58,107 +128,241 @@ class VersionControl {
         }
     }
 
-    // Create a new version
+    // Create a new version (creates child version under current version)
     createVersion(data, description = 'Manual save') {
-        // If we're not at the latest version, remove all versions after current
-        if (this.currentIndex < this.versions.length - 1) {
-            this.versions = this.versions.slice(0, this.currentIndex + 1);
-        }
-
-        // Create new version
-        const version = {
+        const newVersion = {
             id: this.generateId(),
+            parentId: this.currentId,
+            children: [],
             timestamp: new Date().toISOString(),
             data: JSON.parse(JSON.stringify(data)), // Deep copy
             description: description,
-            wordCount: data.length
+            wordCount: data.length,
+            lastAccessed: new Date().toISOString()
         };
 
-        this.versions.push(version);
-        this.currentIndex = this.versions.length - 1;
+        // If current version exists, add as its child
+        if (this.currentId) {
+            const parent = this.versions.get(this.currentId);
+            if (parent) {
+                parent.children.push(newVersion.id);
+            }
+        } else {
+            // First version, set as root
+            this.rootId = newVersion.id;
+        }
 
-        // Limit number of versions
-        if (this.versions.length > this.maxVersions) {
-            this.removeOldVersions(1);
+        this.versions.set(newVersion.id, newVersion);
+        this.currentId = newVersion.id;
+
+        // Limit number of versions (keep recently accessed)
+        if (this.versions.size > this.maxVersions) {
+            this.pruneOldVersions();
         }
 
         this.saveHistory();
-        return version;
+        return newVersion;
     }
 
-    // Remove old versions
-    removeOldVersions(count) {
-        if (this.versions.length <= 1) return;
-
-        const toRemove = Math.min(count, this.versions.length - 1);
-        this.versions.splice(0, toRemove);
-        this.currentIndex = Math.max(0, this.currentIndex - toRemove);
-    }
-
-    // Undo - go to previous version
+    // Smart Undo (prefer current branch, choose most recent at forks)
     undo() {
-        if (!this.canUndo()) {
-            return null;
-        }
+        if (!this.canUndo()) return null;
 
-        this.currentIndex--;
-        this.saveHistory();
-        return this.getCurrentVersion();
+        const current = this.versions.get(this.currentId);
+        if (!current || !current.parentId) return null; // Already at root
+
+        this.currentId = current.parentId;
+        const parent = this.versions.get(this.currentId);
+        if (parent) {
+            parent.lastAccessed = new Date().toISOString();
+            this.saveHistory();
+        }
+        return parent;
     }
 
-    // Redo - go to next version
+    // Smart Redo (choose most recently accessed child branch)
     redo() {
-        if (!this.canRedo()) {
-            return null;
-        }
+        if (!this.canRedo()) return null;
 
-        this.currentIndex++;
-        this.saveHistory();
-        return this.getCurrentVersion();
+        const current = this.versions.get(this.currentId);
+        if (!current || current.children.length === 0) return null; // No children
+
+        // Choose most recently accessed child
+        const childId = this.getMostRecentChild(current.children);
+        this.currentId = childId;
+        const child = this.versions.get(childId);
+        if (child) {
+            child.lastAccessed = new Date().toISOString();
+            this.saveHistory();
+        }
+        return child;
+    }
+
+    // Get most recently accessed child version
+    getMostRecentChild(childIds) {
+        if (childIds.length === 0) return null;
+        if (childIds.length === 1) return childIds[0];
+
+        let mostRecent = childIds[0];
+        let mostRecentTime = this.versions.get(mostRecent).lastAccessed;
+
+        for (let i = 1; i < childIds.length; i++) {
+            const childId = childIds[i];
+            const child = this.versions.get(childId);
+            if (child && child.lastAccessed > mostRecentTime) {
+                mostRecent = childId;
+                mostRecentTime = child.lastAccessed;
+            }
+        }
+        return mostRecent;
     }
 
     // Check if can undo
     canUndo() {
-        return this.currentIndex > 0;
+        if (!this.currentId) return false;
+        const current = this.versions.get(this.currentId);
+        return current && current.parentId !== null;
     }
 
     // Check if can redo
     canRedo() {
-        return this.currentIndex < this.versions.length - 1;
+        if (!this.currentId) return false;
+        const current = this.versions.get(this.currentId);
+        return current && current.children.length > 0;
     }
 
     // Get current version
     getCurrentVersion() {
-        if (this.currentIndex >= 0 && this.currentIndex < this.versions.length) {
-            return this.versions[this.currentIndex];
-        }
-        return null;
+        if (!this.currentId) return null;
+        return this.versions.get(this.currentId);
     }
 
-    // Go to specific version
-    goToVersion(index) {
-        if (index >= 0 && index < this.versions.length) {
-            this.currentIndex = index;
+    // Go to specific version by ID
+    goToVersion(versionId) {
+        if (!this.versions.has(versionId)) return null;
+
+        this.currentId = versionId;
+        const version = this.versions.get(versionId);
+        if (version) {
+            version.lastAccessed = new Date().toISOString();
             this.saveHistory();
-            return this.versions[index];
         }
-        return null;
+        return version;
     }
 
-    // Get version history
+    // Check if version is in current path (from current to root)
+    isInCurrentPath(versionId) {
+        let current = this.currentId;
+        while (current) {
+            if (current === versionId) return true;
+            const version = this.versions.get(current);
+            current = version ? version.parentId : null;
+        }
+        return false;
+    }
+
+    // Delete version and all its children (recursive)
+    deleteVersionAndChildren(versionId) {
+        const version = this.versions.get(versionId);
+        if (!version) return;
+
+        // Recursively delete all children first
+        for (const childId of version.children) {
+            this.deleteVersionAndChildren(childId);
+        }
+
+        // Delete this version
+        this.versions.delete(versionId);
+    }
+
+    // Prune old versions (keep recently accessed, protect current path)
+    pruneOldVersions(forceRemove = 0) {
+        const targetSize = forceRemove > 0 ? this.versions.size - forceRemove : this.maxVersions;
+        if (this.versions.size <= targetSize) return;
+
+        const toRemove = this.versions.size - targetSize;
+
+        // Get all versions sorted by last accessed time
+        const allVersions = Array.from(this.versions.values())
+            .sort((a, b) => new Date(a.lastAccessed) - new Date(b.lastAccessed));
+
+        let removed = 0;
+        for (const version of allVersions) {
+            if (removed >= toRemove) break;
+
+            // Don't delete versions in current path
+            if (this.isInCurrentPath(version.id)) continue;
+
+            // Don't delete root node
+            if (version.id === this.rootId) continue;
+
+            // Remove from parent's children array
+            if (version.parentId) {
+                const parent = this.versions.get(version.parentId);
+                if (parent) {
+                    parent.children = parent.children.filter(id => id !== version.id);
+                }
+            }
+
+            // Delete this version and all its children
+            this.deleteVersionAndChildren(version.id);
+            removed++;
+        }
+    }
+
+    // Get version tree for display
+    getVersionTree() {
+        if (!this.rootId) return [];
+
+        const buildTree = (versionId, depth = 0) => {
+            const version = this.versions.get(versionId);
+            if (!version) return null;
+
+            const node = {
+                ...version,
+                depth: depth,
+                isCurrent: versionId === this.currentId,
+                hasChildren: version.children.length > 0
+            };
+
+            const result = [node];
+
+            // Recursively add children (sorted by timestamp)
+            const sortedChildren = [...version.children].sort((a, b) => {
+                const vA = this.versions.get(a);
+                const vB = this.versions.get(b);
+                return new Date(vA.timestamp) - new Date(vB.timestamp);
+            });
+
+            for (const childId of sortedChildren) {
+                const childTree = buildTree(childId, depth + 1);
+                if (childTree) {
+                    result.push(...childTree);
+                }
+            }
+
+            return result;
+        };
+
+        return buildTree(this.rootId);
+    }
+
+    // Get version history (for compatibility)
     getHistory() {
         return {
-            versions: this.versions,
-            currentIndex: this.currentIndex,
+            versions: Array.from(this.versions.values()),
+            currentIndex: -1, // Deprecated in tree structure
             canUndo: this.canUndo(),
-            canRedo: this.canRedo()
+            canRedo: this.canRedo(),
+            tree: this.getVersionTree()
         };
     }
 
     // Clear all history
     clearHistory() {
-        this.versions = [];
-        this.currentIndex = -1;
+        this.versions = new Map();
+        this.rootId = null;
+        this.currentId = null;
         this.saveHistory();
     }
 
@@ -169,8 +373,9 @@ class VersionControl {
             localStorage.setItem('wordMemorySettings', JSON.stringify({ maxVersions: this.maxVersions }));
 
             // Trim versions if needed
-            if (this.versions.length > this.maxVersions) {
-                this.removeOldVersions(this.versions.length - this.maxVersions);
+            if (this.versions.size > this.maxVersions) {
+                const toRemove = this.versions.size - this.maxVersions;
+                this.pruneOldVersions(toRemove);
             }
         }
     }
@@ -290,9 +495,9 @@ window.onload = function() {
     versionControl = new VersionControl(50);
 
     // Create initial version if no versions exist
-    if (versionControl.versions.length === 0 && words.length > 0) {
+    if (versionControl.versions.size === 0 && words.length > 0) {
         versionControl.createVersion(words, 'Initial version');
-    } else if (versionControl.versions.length === 0 && words.length === 0) {
+    } else if (versionControl.versions.size === 0 && words.length === 0) {
         versionControl.createVersion([], 'Initial empty state');
     }
 
@@ -587,6 +792,7 @@ function toggleWordSelection(index) {
     }
     updateBatchToolbar();
     updateWordSelectionUI();
+
 }
 
 // Toggle select mode
@@ -641,6 +847,7 @@ function selectAll() {
 
     updateBatchToolbar();
     updateWordSelectionUI();
+
 }
 
 // Deselect all words
@@ -648,6 +855,7 @@ function selectNone() {
     selectedWords.clear();
     updateBatchToolbar();
     updateWordSelectionUI();
+
 }
 
 // Invert selection
@@ -671,20 +879,121 @@ function selectInvert() {
     selectedWords = newSelection;
     updateBatchToolbar();
     updateWordSelectionUI();
+
 }
 
-// Select by weight range
-function selectByWeight(minWeight, maxWeight) {
-    selectedWords.clear();
+// Parse weight range inputs
+function getWeightRange() {
+    const minVal = document.getElementById('weightMinInput').value.trim();
+    const maxVal = document.getElementById('weightMaxInput').value.trim();
 
+    const min = minVal === '' ? -3 : parseInt(minVal, 10);
+    const max = maxVal === '' ? Infinity : parseInt(maxVal, 10);
+
+    if (isNaN(min)) return null;
+    if (maxVal !== '' && isNaN(max)) return null;
+
+    return { min, max };
+}
+
+// Add weight range to selection
+function addWeightRange() {
+    const range = getWeightRange();
+    if (!range) {
+        showStatus('Invalid weight range', 'error');
+        return;
+    }
+
+    let count = 0;
     words.forEach((w, index) => {
-        if (w.weight >= minWeight && w.weight <= maxWeight) {
+        if (w.weight >= range.min && w.weight <= range.max) {
             selectedWords.add(index);
+            count++;
         }
     });
 
     updateBatchToolbar();
     updateWordSelectionUI();
+    showStatus(`+${count} word(s)`, 'success');
+}
+
+// Remove weight range from selection
+function removeWeightRange() {
+    const range = getWeightRange();
+    if (!range) {
+        showStatus('Invalid weight range', 'error');
+        return;
+    }
+
+    let count = 0;
+    words.forEach((w, index) => {
+        if (w.weight >= range.min && w.weight <= range.max) {
+            if (selectedWords.has(index)) {
+                selectedWords.delete(index);
+                count++;
+            }
+        }
+    });
+
+    updateBatchToolbar();
+    updateWordSelectionUI();
+    showStatus(`−${count} word(s)`, 'success');
+}
+
+// Select by regex (add matching words to selection)
+function selectByRegex() {
+    const pattern = document.getElementById('regexFilterInput').value.trim();
+    if (!pattern) {
+        showStatus('Please enter a regex pattern', 'error');
+        return;
+    }
+
+    try {
+        const regex = new RegExp(pattern, 'i');
+        let matchCount = 0;
+
+        words.forEach((w, index) => {
+            if (regex.test(w.word) || regex.test(w.meaning)) {
+                selectedWords.add(index);
+                matchCount++;
+            }
+        });
+
+        updateBatchToolbar();
+        updateWordSelectionUI();
+    
+        showStatus(`Matched ${matchCount} word(s)`, 'success');
+    } catch (e) {
+        showStatus('Invalid regex pattern', 'error');
+    }
+}
+
+// Deselect by regex (remove matching words from selection)
+function deselectByRegex() {
+    const pattern = document.getElementById('regexFilterInput').value.trim();
+    if (!pattern) {
+        showStatus('Please enter a regex pattern', 'error');
+        return;
+    }
+
+    try {
+        const regex = new RegExp(pattern, 'i');
+        let matchCount = 0;
+
+        words.forEach((w, index) => {
+            if (regex.test(w.word) || regex.test(w.meaning)) {
+                selectedWords.delete(index);
+                matchCount++;
+            }
+        });
+
+        updateBatchToolbar();
+        updateWordSelectionUI();
+    
+        showStatus(`Unmatched ${matchCount} word(s)`, 'success');
+    } catch (e) {
+        showStatus('Invalid regex pattern', 'error');
+    }
 }
 
 // Batch adjust weight
@@ -997,7 +1306,8 @@ function loadData() {
 }
 
 // Export data
-function exportData() {
+// Export data only (without version history)
+function exportDataOnly() {
     const dataStr = JSON.stringify(words, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1006,9 +1316,187 @@ function exportData() {
     a.download = `words-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    showStatus('Exported data only', 'success');
 }
 
-// Import data
+// Export data with complete version history
+function exportWithVersionHistory() {
+    if (!versionControl) {
+        showStatus('Version control not initialized', 'error');
+        return;
+    }
+
+    const exportData = {
+        words: words,
+        versionHistory: {
+            format: 'tree-v1',
+            versions: Object.fromEntries(versionControl.versions),
+            rootId: versionControl.rootId,
+            currentId: versionControl.currentId,
+            exportDate: new Date().toISOString()
+        }
+    };
+
+    const dataStr = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `words-with-history-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showStatus('Exported data with version history', 'success');
+}
+
+// Legacy export function (for backward compatibility)
+function exportData() {
+    exportDataOnly();
+}
+
+// Validate version history structure
+function validateVersionHistory(versionHistory) {
+    if (!versionHistory.format || versionHistory.format !== 'tree-v1') {
+        return { valid: false, error: 'Unsupported format version' };
+    }
+
+    if (!versionHistory.versions || !versionHistory.rootId) {
+        return { valid: false, error: 'Missing versions or rootId' };
+    }
+
+    const versions = new Map(Object.entries(versionHistory.versions));
+
+    // Validate rootId exists
+    if (!versions.has(versionHistory.rootId)) {
+        return { valid: false, error: 'Root version not found' };
+    }
+
+    // Validate currentId exists
+    if (versionHistory.currentId && !versions.has(versionHistory.currentId)) {
+        return { valid: false, error: 'Current version not found' };
+    }
+
+    // Validate tree structure integrity
+    for (const [id, version] of versions) {
+        // Validate parent reference
+        if (version.parentId && !versions.has(version.parentId)) {
+            return { valid: false, error: `Invalid parent reference: ${version.parentId}` };
+        }
+
+        // Validate children references
+        for (const childId of version.children || []) {
+            if (!versions.has(childId)) {
+                return { valid: false, error: `Invalid child reference: ${childId}` };
+            }
+        }
+    }
+
+    return { valid: true };
+}
+
+// Process and validate imported words data
+function processImportedWords(imported) {
+    let validCount = 0;
+    let invalidCount = 0;
+
+    const processed = imported.map(item => {
+        // Convert old POS format (string) to new format (array)
+        let posArray = [];
+        if (item.pos) {
+            if (Array.isArray(item.pos)) {
+                posArray = item.pos;
+            } else if (typeof item.pos === 'string' && item.pos.trim() !== '') {
+                posArray = [item.pos.trim()];
+            }
+        }
+
+        // Check if word exists
+        if (!item.word || typeof item.word !== 'string' || item.word.trim() === '') {
+            invalidCount++;
+            return {
+                word: item.word || '[no word]',
+                meaning: item.meaning || '',
+                pos: posArray,
+                weight: -3,
+                added: item.added || new Date().toISOString().split('T')[0]
+            };
+        }
+
+        // Check if weight is valid
+        const weight = parseInt(item.weight);
+        if (isNaN(weight) || weight < -2) {
+            invalidCount++;
+            return {
+                word: item.word.toLowerCase(),
+                meaning: item.meaning || '',
+                pos: posArray,
+                weight: -3,
+                added: item.added || new Date().toISOString().split('T')[0]
+            };
+        }
+
+        // Valid word
+        validCount++;
+        return {
+            word: item.word.toLowerCase(),
+            meaning: item.meaning || '',
+            pos: posArray,
+            weight: weight,
+            added: item.added || new Date().toISOString().split('T')[0]
+        };
+    });
+
+    return { processed, validCount, invalidCount };
+}
+
+// Import words only (clear version history)
+function importWordsOnly(wordsData) {
+    const { processed, validCount, invalidCount } = processImportedWords(wordsData);
+    words = processed;
+
+    // Clear version history and create new initial version
+    if (versionControl) {
+        versionControl.clearHistory();
+    }
+
+    saveData(false, `Imported ${processed.length} word(s)`);
+    renderWords();
+
+    if (invalidCount > 0) {
+        showStatus(`Imported ${validCount} valid, ${invalidCount} invalid words (version history cleared)`, 'success');
+    } else {
+        showStatus(`Imported ${processed.length} words (version history cleared)`, 'success');
+    }
+}
+
+// Import data with version history
+function importWithVersionHistory(importedData) {
+    const { processed, validCount, invalidCount } = processImportedWords(importedData.words);
+    words = processed;
+
+    // Import version history
+    versionControl.versions = new Map(Object.entries(importedData.versionHistory.versions));
+    versionControl.rootId = importedData.versionHistory.rootId;
+    versionControl.currentId = importedData.versionHistory.currentId;
+    versionControl.saveHistory();
+
+    // Switch to current version
+    const currentVersion = versionControl.versions.get(versionControl.currentId);
+    if (currentVersion) {
+        words = JSON.parse(JSON.stringify(currentVersion.data));
+    }
+
+    localStorage.setItem('wordMemoryData', JSON.stringify(words));
+    renderWords();
+
+    const versionCount = versionControl.versions.size;
+    if (invalidCount > 0) {
+        showStatus(`Imported ${validCount} valid, ${invalidCount} invalid words with ${versionCount} version(s)`, 'success');
+    } else {
+        showStatus(`Imported ${processed.length} words with ${versionCount} version(s)`, 'success');
+    }
+}
+
+// Import data (enhanced with version history support)
 function importData(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1017,72 +1505,33 @@ function importData(event) {
     reader.onload = function(e) {
         try {
             const imported = JSON.parse(e.target.result);
-            if (Array.isArray(imported)) {
-                if (confirm(`Import ${imported.length} words? This will overwrite current data.`)) {
-                    // Validate and clean imported data
-                    let validCount = 0;
-                    let invalidCount = 0;
 
-                    words = imported.map(item => {
-                        // Convert old POS format (string) to new format (array)
-                        let posArray = [];
-                        if (item.pos) {
-                            if (Array.isArray(item.pos)) {
-                                posArray = item.pos;
-                            } else if (typeof item.pos === 'string' && item.pos.trim() !== '') {
-                                posArray = [item.pos.trim()];
-                            }
-                        }
+            // Check if it contains version history
+            if (imported.versionHistory) {
+                const validation = validateVersionHistory(imported.versionHistory);
 
-                        // Check if word exists
-                        if (!item.word || typeof item.word !== 'string' || item.word.trim() === '') {
-                            invalidCount++;
-                            return {
-                                word: item.word || '[no word]',
-                                meaning: item.meaning || '',
-                                pos: posArray,
-                                weight: -3,
-                                added: item.added || new Date().toISOString().split('T')[0]
-                            };
-                        }
-
-                        // Check if weight is valid
-                        const weight = parseInt(item.weight);
-                        if (isNaN(weight) || weight < -2) {
-                            invalidCount++;
-                            return {
-                                word: item.word.toLowerCase(),
-                                meaning: item.meaning || '',
-                                pos: posArray,
-                                weight: -3,
-                                added: item.added || new Date().toISOString().split('T')[0]
-                            };
-                        }
-
-                        // Valid word
-                        validCount++;
-                        return {
-                            word: item.word.toLowerCase(),
-                            meaning: item.meaning || '',
-                            pos: posArray,
-                            weight: weight,
-                            added: item.added || new Date().toISOString().split('T')[0]
-                        };
-                    });
-
-                    // Clear version history and create new initial version
-                    if (versionControl) {
-                        versionControl.clearHistory();
+                if (!validation.valid) {
+                    // Version history is corrupted, ask user
+                    if (confirm(`Version history is corrupted: ${validation.error}\n\nContinue importing data only (version history will be cleared)?`)) {
+                        importWordsOnly(imported.words || imported);
                     }
+                    event.target.value = '';
+                    return;
+                }
 
-                    saveData(false, `Imported ${imported.length} word(s)`);
-                    renderWords();
-
-                    if (invalidCount > 0) {
-                        showStatus(`Imported ${validCount} valid, ${invalidCount} invalid words`, 'success');
-                    } else {
-                        showStatus(`Imported ${imported.length} words`, 'success');
-                    }
+                // Version history is valid, ask user to confirm full import
+                if (confirm(`Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`)) {
+                    importWithVersionHistory(imported);
+                }
+            } else if (Array.isArray(imported)) {
+                // Old format - words array only
+                if (confirm(`Import ${imported.length} words? This will overwrite current data and clear version history.`)) {
+                    importWordsOnly(imported);
+                }
+            } else if (imported.words && Array.isArray(imported.words)) {
+                // Object with words array but no version history
+                if (confirm(`Import ${imported.words.length} words? This will overwrite current data and clear version history.`)) {
+                    importWordsOnly(imported.words);
                 }
             } else {
                 showStatus('Invalid file format', 'error');
@@ -1217,38 +1666,57 @@ function closeHistoryModal() {
 function renderVersionHistory() {
     if (!versionControl) return;
 
-    const history = versionControl.getHistory();
+    const tree = versionControl.getVersionTree();
     const container = document.getElementById('historyList');
 
-    // Update version info
-    document.getElementById('currentVersionIndex').textContent = history.currentIndex + 1;
-    document.getElementById('totalVersions').textContent = history.versions.length;
-    document.getElementById('canUndo').textContent = history.canUndo ? 'Yes' : 'No';
-    document.getElementById('canRedo').textContent = history.canRedo ? 'Yes' : 'No';
+    // Update version info with tree structure
+    const currentVersion = versionControl.getCurrentVersion();
+    const totalVersions = versionControl.versions.size;
+    document.getElementById('currentVersionIndex').textContent = currentVersion ? '✓' : '-';
+    document.getElementById('totalVersions').textContent = totalVersions;
+    document.getElementById('canUndo').textContent = versionControl.canUndo() ? 'Yes' : 'No';
+    document.getElementById('canRedo').textContent = versionControl.canRedo() ? 'Yes' : 'No';
 
-    if (history.versions.length === 0) {
+    if (tree.length === 0) {
         container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">—</div><div>No Version History</div></div>';
         return;
     }
 
     let html = '';
-    history.versions.forEach((version, index) => {
-        const isCurrent = index === history.currentIndex;
+    tree.forEach(version => {
+        const isCurrent = version.isCurrent;
+        const hasMultipleBranches = version.children.length > 1;
+
+        // Create tree prefix with indentation
+        const indent = '  '.repeat(version.depth); // 2 spaces per depth level
+        let branchIcon = '';
+
+        if (version.depth > 0) {
+            if (hasMultipleBranches) {
+                branchIcon = '┬'; // Has multiple branches
+            } else if (version.hasChildren) {
+                branchIcon = '├'; // Has single child
+            } else {
+                branchIcon = '└'; // Leaf node
+            }
+        }
+
+        const prefix = version.depth > 0 ? indent + branchIcon + ' ' : '';
+
         const date = new Date(version.timestamp);
         const dateStr = date.toLocaleString('en-GB', {
-            year: 'numeric',
             month: '2-digit',
             day: '2-digit',
             hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
+            minute: '2-digit'
         });
 
         html += `
-            <div class="version-item ${isCurrent ? 'current' : ''}" onclick="goToVersionByIndex(${index})">
+            <div class="version-item ${isCurrent ? 'current' : ''} depth-${version.depth}" onclick="goToVersionById('${version.id}')">
                 <div class="version-header">
-                    <span class="version-number">#${index + 1}</span>
+                    <span class="version-tree-prefix">${prefix}</span>
                     <span class="version-date">${dateStr}</span>
+                    ${hasMultipleBranches ? '<span class="branch-indicator">⑂</span>' : ''}
                 </div>
                 <div class="version-description">${version.description}</div>
                 <div class="version-meta">${version.wordCount} word(s)${isCurrent ? ' • Current' : ''}</div>
@@ -1259,10 +1727,10 @@ function renderVersionHistory() {
     container.innerHTML = html;
 }
 
-function goToVersionByIndex(index) {
+function goToVersionById(versionId) {
     if (!versionControl) return;
 
-    const version = versionControl.goToVersion(index);
+    const version = versionControl.goToVersion(versionId);
     if (version) {
         words = JSON.parse(JSON.stringify(version.data)); // Deep copy
         localStorage.setItem('wordMemoryData', JSON.stringify(words));

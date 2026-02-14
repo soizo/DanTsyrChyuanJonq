@@ -103,12 +103,20 @@
                 <button class="btn-batch" onclick="selectInvert()">Invert</button>
             </div>
             <div class="batch-toolbar-section">
-                <div class="batch-toolbar-label">By Weight:</div>
-                <button class="btn-batch" onclick="selectByWeight(5, 10)">5+</button>
-                <button class="btn-batch" onclick="selectByWeight(3, 4)">3-4</button>
-                <button class="btn-batch" onclick="selectByWeight(1, 2)">1-2</button>
-                <button class="btn-batch" onclick="selectByWeight(0, 0)">0</button>
-                <button class="btn-batch" onclick="selectByWeight(-2, -1)">Mastered</button>
+                <div class="batch-toolbar-label">Weight:</div>
+                <div class="range-input-group">
+                    <input type="number" id="weightMinInput" class="range-input" value="-3" min="-3">
+                    <span class="range-separator">~</span>
+                    <input type="number" id="weightMaxInput" class="range-input" placeholder="∞">
+                </div>
+                <button class="btn-batch btn-batch-add" onclick="addWeightRange()">+</button>
+                <button class="btn-batch btn-batch-remove" onclick="removeWeightRange()">−</button>
+            </div>
+            <div class="batch-toolbar-section">
+                <div class="batch-toolbar-label">Regex:</div>
+                <input type="text" id="regexFilterInput" class="regex-input" placeholder="e.g. ^un.*ing$">
+                <button class="btn-batch btn-batch-add" onclick="selectByRegex()">+</button>
+                <button class="btn-batch btn-batch-remove" onclick="deselectByRegex()">−</button>
             </div>
             <div class="batch-toolbar-section">
                 <div class="batch-toolbar-label">Actions:</div>
@@ -190,6 +198,14 @@
             <div class="form-row">
                 <label>Max Versions</label>
                 <input type="number" id="maxVersionsInput" min="10" max="200" value="50">
+            </div>
+
+            <div class="form-row">
+                <label>Export Options</label>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn-secondary" onclick="exportDataOnly()" style="margin-top: 0;">Data Only</button>
+                    <button class="btn-secondary" onclick="exportWithVersionHistory()" style="margin-top: 0;">With Version History</button>
+                </div>
             </div>
 
             <div class="form-row">

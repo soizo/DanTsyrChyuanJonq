@@ -208,6 +208,7 @@ h1 img {
 
 input[type="text"],
 input[type="date"],
+input[type="number"],
 select {
 	width: 100%;
 	min-width: 0;
@@ -222,10 +223,22 @@ select {
 
 input[type="text"]:focus,
 input[type="date"]:focus,
+input[type="number"]:focus,
 select:focus {
 	outline: none;
 	border-color: var(--color-text);
 	background: var(--color-surface);
+}
+
+input[type="number"] {
+	appearance: textfield;
+	-moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
 }
 
 .form-grid {
@@ -534,6 +547,77 @@ button:disabled {
 .btn-batch:disabled {
 	opacity: 0.3;
 	cursor: not-allowed;
+}
+
+.range-input-group {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.range-input {
+	width: 48px;
+	padding: 4px 6px;
+	font-size: 12px;
+	font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+	border: 1px solid var(--color-border);
+	background: var(--color-bg);
+	color: var(--color-text);
+	text-align: center;
+	height: 30px;
+	margin-top: 0;
+	appearance: textfield;
+	-moz-appearance: textfield;
+}
+
+.range-input::-webkit-outer-spin-button,
+.range-input::-webkit-inner-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+
+.range-separator {
+	font-size: 12px;
+	color: var(--color-text-light);
+	font-weight: 600;
+	user-select: none;
+}
+
+.btn-batch-add {
+	font-size: 14px;
+	font-weight: 700;
+	min-width: 32px;
+	padding: 4px 8px;
+}
+
+.btn-batch-remove {
+	font-size: 14px;
+	font-weight: 700;
+	min-width: 32px;
+	padding: 4px 8px;
+}
+
+.btn-batch-add:active:not(:disabled) {
+	background: var(--color-text);
+	color: var(--color-surface);
+}
+
+.btn-batch-remove:active:not(:disabled) {
+	background: var(--color-text);
+	color: var(--color-surface);
+}
+
+.regex-input {
+	flex: 1;
+	min-width: 80px;
+	padding: 6px var(--space-sm);
+	font-size: 12px;
+	font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+	border: 1px solid var(--color-border);
+	background: var(--color-bg);
+	color: var(--color-text);
+	margin-top: 0;
+	height: 30px;
 }
 
 .btn-batch-up {
@@ -1043,6 +1127,50 @@ button:disabled {
 	opacity: 0.6;
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
+}
+
+/* Tree-specific styles */
+.version-tree-prefix {
+	font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+	font-size: 10px;
+	margin-right: 8px;
+	color: var(--color-text-light);
+	white-space: pre;
+	display: inline-block;
+}
+
+.branch-indicator {
+	font-size: 11px;
+	margin-left: 8px;
+	opacity: 0.8;
+	display: inline-block;
+}
+
+/* Depth-based indentation (handled by tree-prefix, but keep for potential future use) */
+.version-item.depth-0 {
+	/* Root level - no extra indentation */
+}
+
+.version-item.depth-1 {
+	/* First level children */
+}
+
+.version-item.depth-2 {
+	/* Second level children */
+}
+
+.version-item.depth-3 {
+	/* Third level children */
+}
+
+/* Ensure current version stands out in tree view */
+.version-item.current .version-tree-prefix {
+	color: var(--color-surface);
+	opacity: 0.8;
+}
+
+.version-item.current .branch-indicator {
+	opacity: 1;
 }
 
 /* ========================================
