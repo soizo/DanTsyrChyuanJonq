@@ -151,9 +151,9 @@ function renderWords() {
     // Filter words
     let filteredWords = words.filter(w => {
         if (isFullMode) {
-            return w.weight >= -1;
+            return w.weight >= -2; // Show -2, -1, 0, 1, 2, 3, 4, 5+
         } else {
-            return w.weight >= 0;
+            return w.weight >= 0; // Show only 0, 1, 2, 3, 4, 5+
         }
     });
 
