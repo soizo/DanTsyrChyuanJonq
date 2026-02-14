@@ -3,6 +3,19 @@ let words = [];
 let isFullMode = false;
 let editingIndex = -1;
 
+function getWeightLabel(weight) {
+    const name = weight >= 5 ? 'Hardest' :
+                 weight === 4 ? 'Hard' :
+                 weight === 3 ? 'Memorise' :
+                 weight === 2 ? 'Normal' :
+                 weight === 1 ? 'Recognise' :
+                 weight === 0 ? 'Basic' :
+                 weight === -1 ? 'Mastered' :
+                 'Easy';
+
+    return `[${weight}]${name}`;
+}
+
 // Initialize
 window.onload = function() {
     loadData();
@@ -176,14 +189,7 @@ function renderWords() {
         const groupWords = groups[weight];
         const isMastered = weight < 0;
 
-        const groupLabel = weight >= 5 ? `Weight ${weight} — Hardest` :
-                          weight === 4 ? `Weight ${weight} — Hard` :
-                          weight === 3 ? `Weight ${weight} — Memorize` :
-                          weight === 2 ? `Weight ${weight} — Normal` :
-                          weight === 1 ? `Weight ${weight} — Recognize` :
-                          weight === 0 ? `Weight ${weight} — Basic` :
-                          weight === -1 ? `Weight ${weight} — Mastered` :
-                          `Weight ${weight} — Easy`;
+        const groupLabel = getWeightLabel(weight);
 
         if (isMastered) {
             html += `
@@ -204,6 +210,11 @@ function renderWords() {
         groupWords.forEach(w => {
             const originalIndex = words.indexOf(w);
             const masteredClass = isMastered ? 'mastered' : '';
+            const weightText = String(w.weight);
+            const weightShapeClass = weightText.length > 1 ? 'is-wide' : '';
+            const weightDisplay = weightText.length > 1
+                ? `<span class="word-weight-text is-squeezed">${weightText}</span>`
+                : `<span class="word-weight-text">${weightText}</span>`;
 
             html += `
                 <div class="word-item ${masteredClass}">
@@ -212,7 +223,7 @@ function renderWords() {
                             <span class="word-title">${w.word}</span>
                             ${w.pos ? `<span class="word-pos">${w.pos}</span>` : ''}
                         </div>
-                        <div class="word-weight">${w.weight}</div>
+                        <div class="word-weight ${weightShapeClass}">${weightDisplay}</div>
                     </div>
                     <div class="word-meaning">${w.meaning}</div>
                     <div class="word-meta">Added: ${w.added}</div>

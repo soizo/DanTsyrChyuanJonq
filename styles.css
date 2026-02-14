@@ -40,7 +40,9 @@ html {
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Arial', sans-serif;
+    font-family: 'Sarasa UI CL', 'Sarasa UI SC', 'PingFang TC', 'Noto Sans CJK TC',
+                 'Noto Sans TC', 'Microsoft JhengHei', 'Heiti TC', 'Source Han Sans TC',
+                 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', 'Arial', sans-serif;
     background: var(--color-bg);
     color: var(--color-text);
     line-height: 1.6;
@@ -294,15 +296,29 @@ button {
 }
 
 .word-weight {
-    font-size: 10px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--color-text-light);
-    min-width: 20px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     text-align: center;
-    padding: 2px var(--space-sm);
+    padding: 0;
     background: transparent;
     border: 1px solid var(--color-border);
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
+    flex-shrink: 0;
+}
+
+.word-weight-text {
+    display: inline-block;
+}
+
+.word-weight-text.is-squeezed {
+    transform: scaleX(0.65);
+    letter-spacing: -0.05em;
 }
 
 .word-meaning {
