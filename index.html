@@ -1,650 +1,117 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>单词记忆系统</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
-            background: #ffffff;
-            color: #1d1d1f;
-            line-height: 1.6;
-            padding-bottom: 60px;
-        }
-
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        h1 {
-            font-size: 28px;
-            font-weight: 600;
-            margin-bottom: 30px;
-            text-align: center;
-            letter-spacing: -0.5px;
-        }
-
-        /* 模式切换 */
-        .mode-switch {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 30px;
-            padding: 16px;
-            background: #f5f5f7;
-            border-radius: 12px;
-        }
-
-        .mode-switch label {
-            font-size: 15px;
-            color: #86868b;
-        }
-
-        .toggle {
-            position: relative;
-            width: 51px;
-            height: 31px;
-            background: #e5e5ea;
-            border-radius: 15.5px;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-
-        .toggle.active {
-            background: #34c759;
-        }
-
-        .toggle-slider {
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 27px;
-            height: 27px;
-            background: white;
-            border-radius: 50%;
-            transition: transform 0.3s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .toggle.active .toggle-slider {
-            transform: translateX(20px);
-        }
-
-        /* 添加单词表单 */
-        .add-form {
-            background: #f5f5f7;
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 30px;
-        }
-
-        .form-row {
-            margin-bottom: 12px;
-        }
-
-        .form-row:last-child {
-            margin-bottom: 0;
-        }
-
-        .form-row label {
-            display: block;
-            font-size: 13px;
-            color: #86868b;
-            margin-bottom: 6px;
-        }
-
-        input[type="text"], select {
-            width: 100%;
-            padding: 12px;
-            font-size: 16px;
-            border: 1px solid #d2d2d7;
-            border-radius: 8px;
-            background: white;
-            transition: border-color 0.2s;
-        }
-
-        input[type="text"]:focus, select:focus {
-            outline: none;
-            border-color: #0071e3;
-        }
-
-        .form-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-        }
-
-        button {
-            width: 100%;
-            padding: 14px;
-            font-size: 16px;
-            font-weight: 500;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-            margin-top: 12px;
-        }
-
-        .btn-primary {
-            background: #0071e3;
-            color: white;
-        }
-
-        .btn-primary:active {
-            background: #0077ed;
-            transform: scale(0.98);
-        }
-
-        .btn-secondary {
-            background: #e5e5ea;
-            color: #1d1d1f;
-        }
-
-        .btn-secondary:active {
-            background: #d2d2d7;
-            transform: scale(0.98);
-        }
-
-        /* 数据管理按钮 */
-        .data-controls {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 30px;
-        }
-
-        .data-controls button {
-            margin-top: 0;
-        }
-
-        /* 单词列表 */
-        .word-group {
-            margin-bottom: 40px;
-        }
-
-        .group-header {
-            font-size: 13px;
-            font-weight: 600;
-            color: #86868b;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 12px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #e5e5ea;
-        }
-
-        .word-item {
-            background: white;
-            padding: 16px;
-            margin-bottom: 1px;
-            border-left: 3px solid transparent;
-            transition: all 0.2s;
-        }
-
-        .word-item:first-child {
-            border-top-left-radius: 8px;
-            border-top-right-radius: 8px;
-        }
-
-        .word-item:last-child {
-            border-bottom-left-radius: 8px;
-            border-bottom-right-radius: 8px;
-            margin-bottom: 0;
-        }
-
-        .word-item.weight-5 { border-left-color: #ff3b30; }
-        .word-item.weight-4 { border-left-color: #ff9500; }
-        .word-item.weight-3 { border-left-color: #ffcc00; }
-        .word-item.weight-2 { border-left-color: #34c759; }
-        .word-item.weight-1 { border-left-color: #007aff; }
-        .word-item.weight-0 { border-left-color: #8e8e93; }
-
-        .word-item.mastered {
-            color: #86868b;
-            background: #fafafa;
-        }
-
-        .word-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 8px;
-        }
-
-        .word-title {
-            font-size: 18px;
-            font-weight: 600;
-        }
-
-        .word-pos {
-            font-size: 12px;
-            color: #86868b;
-            margin-left: 8px;
-        }
-
-        .word-weight {
-            font-size: 13px;
-            font-weight: 600;
-            color: #86868b;
-            min-width: 30px;
-            text-align: right;
-        }
-
-        .word-meaning {
-            font-size: 15px;
-            color: #515154;
-            margin-bottom: 12px;
-        }
-
-        .word-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .word-actions button {
-            flex: 1;
-            padding: 8px;
-            font-size: 14px;
-            margin-top: 0;
-        }
-
-        .btn-remember {
-            background: #34c759;
-            color: white;
-        }
-
-        .btn-forget {
-            background: #ff9500;
-            color: white;
-        }
-
-        .btn-delete {
-            background: #ff3b30;
-            color: white;
-            flex: 0 0 auto;
-            min-width: 60px;
-        }
-
-        .btn-remember:active { background: #30b450; }
-        .btn-forget:active { background: #e68a00; }
-        .btn-delete:active { background: #e63529; }
-
-        /* 折叠区域 */
-        .collapsible-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .collapse-icon {
-            transition: transform 0.3s;
-        }
-
-        .collapse-icon.expanded {
-            transform: rotate(180deg);
-        }
-
-        .collapsible-content {
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.3s ease;
-        }
-
-        .collapsible-content.expanded {
-            max-height: 5000px;
-        }
-
-        /* 空状态 */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #86868b;
-        }
-
-        .empty-state-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-        }
-
-        /* 隐藏文件输入 */
-        #importFile {
-            display: none;
-        }
-
-        /* 响应式 */
-        @media (max-width: 600px) {
-            .container {
-                padding: 16px;
-            }
-
-            h1 {
-                font-size: 24px;
-            }
-
-            .form-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Words">
+    <meta name="theme-color" content="#F5F4F0">
+    <title>Word Memory</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="container">
-        <h1>单词记忆系统</h1>
+        <h1>Word Memory</h1>
 
-        <!-- 模式切换 -->
+        <!-- Mode Switch -->
         <div class="mode-switch">
-            <label>日常模式</label>
+            <label>Daily</label>
             <div class="toggle" id="modeToggle">
                 <div class="toggle-slider"></div>
             </div>
-            <label>全量模式</label>
+            <label>Full</label>
         </div>
 
-        <!-- 添加单词表单 -->
+        <!-- Add Word Form -->
         <div class="add-form">
             <div class="form-row">
-                <label>单词 *</label>
-                <input type="text" id="wordInput" placeholder="输入单词" required>
+                <label>Word</label>
+                <input type="text" id="wordInput" required>
             </div>
             <div class="form-row">
-                <label>含义 *</label>
-                <input type="text" id="meaningInput" placeholder="输入含义" required>
+                <label>Meaning</label>
+                <input type="text" id="meaningInput" required>
             </div>
-            <div class="form-grid">
+            <div class="form-grid-3">
                 <div class="form-row">
-                    <label>词性（可选）</label>
-                    <input type="text" id="posInput" placeholder="如：n. v. adj.">
+                    <label>POS</label>
+                    <input type="text" id="posInput">
                 </div>
                 <div class="form-row">
-                    <label>权重 *</label>
+                    <label>Weight</label>
                     <select id="weightInput">
-                        <option value="5">5 - 最难</option>
-                        <option value="4">4 - 较难</option>
-                        <option value="3" selected>3 - 需精记（默认）</option>
-                        <option value="2">2 - 一般</option>
-                        <option value="1">1 - 只需看懂</option>
-                        <option value="0">0 - 基本掌握</option>
-                        <option value="-1">-1 - 完全掌握</option>
-                        <option value="-2">-2 - 过于简单</option>
+                        <option value="5">5 — Hardest</option>
+                        <option value="4">4 — Hard</option>
+                        <option value="3" selected>3 — Memorize</option>
+                        <option value="2">2 — Normal</option>
+                        <option value="1">1 — Recognize</option>
+                        <option value="0">0 — Basic</option>
+                        <option value="-1">-1 — Mastered</option>
+                        <option value="-2">-2 — Easy</option>
                     </select>
                 </div>
+                <div class="form-row">
+                    <label>Date</label>
+                    <input type="date" id="dateInput">
+                </div>
             </div>
-            <button class="btn-primary" onclick="addWord()">添加单词</button>
+            <button class="btn-primary" onclick="addWord()">Add</button>
         </div>
 
-        <!-- 数据管理 -->
+        <!-- Data Controls -->
         <div class="data-controls">
-            <button class="btn-secondary" onclick="exportData()">导出JSON</button>
-            <button class="btn-secondary" onclick="document.getElementById('importFile').click()">导入JSON</button>
+            <button class="btn-secondary" onclick="exportData()">Export</button>
+            <button class="btn-secondary" onclick="document.getElementById('importFile').click()">Import</button>
             <input type="file" id="importFile" accept=".json" onchange="importData(event)">
         </div>
 
-        <!-- 单词列表 -->
+        <!-- Word List -->
         <div id="wordList"></div>
     </div>
 
-    <script>
-        // 数据存储
-        let words = [];
-        let isFullMode = false;
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Edit Word</div>
+            <div class="form-row">
+                <label>Word</label>
+                <input type="text" id="editWordInput">
+            </div>
+            <div class="form-row">
+                <label>Meaning</label>
+                <input type="text" id="editMeaningInput">
+            </div>
+            <div class="form-grid-3">
+                <div class="form-row">
+                    <label>POS</label>
+                    <input type="text" id="editPosInput">
+                </div>
+                <div class="form-row">
+                    <label>Weight</label>
+                    <select id="editWeightInput">
+                        <option value="5">5 — Hardest</option>
+                        <option value="4">4 — Hard</option>
+                        <option value="3">3 — Memorize</option>
+                        <option value="2">2 — Normal</option>
+                        <option value="1">1 — Recognize</option>
+                        <option value="0">0 — Basic</option>
+                        <option value="-1">-1 — Mastered</option>
+                        <option value="-2">-2 — Easy</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>Date</label>
+                    <input type="date" id="editDateInput">
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" onclick="saveEdit()">Save</button>
+                <button class="btn-secondary" onclick="closeEditModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
 
-        // 初始化
-        window.onload = function() {
-            loadData();
-            renderWords();
-        };
-
-        // 模式切换
-        document.getElementById('modeToggle').addEventListener('click', function() {
-            this.classList.toggle('active');
-            isFullMode = !isFullMode;
-            renderWords();
-        });
-
-        // 添加单词
-        function addWord() {
-            const word = document.getElementById('wordInput').value.trim();
-            const meaning = document.getElementById('meaningInput').value.trim();
-            const pos = document.getElementById('posInput').value.trim();
-            const weight = parseInt(document.getElementById('weightInput').value);
-
-            if (!word || !meaning) {
-                alert('请填写单词和含义');
-                return;
-            }
-
-            const newWord = {
-                word: word.toLowerCase(),
-                meaning: meaning,
-                pos: pos,
-                weight: weight,
-                added: new Date().toISOString().split('T')[0]
-            };
-
-            words.push(newWord);
-            saveData();
-            renderWords();
-
-            // 清空表单
-            document.getElementById('wordInput').value = '';
-            document.getElementById('meaningInput').value = '';
-            document.getElementById('posInput').value = '';
-            document.getElementById('weightInput').value = '3';
-        }
-
-        // 更新权重
-        function updateWeight(index, delta) {
-            const newWeight = words[index].weight + delta;
-            
-            // 权重限制在-2到10之间
-            if (newWeight < -2 || newWeight > 10) {
-                return;
-            }
-
-            words[index].weight = newWeight;
-            saveData();
-            renderWords();
-        }
-
-        // 删除单词
-        function deleteWord(index) {
-            if (confirm(`确定删除单词 "${words[index].word}" 吗？`)) {
-                words.splice(index, 1);
-                saveData();
-                renderWords();
-            }
-        }
-
-        // 渲染单词列表
-        function renderWords() {
-            const container = document.getElementById('wordList');
-            
-            // 过滤单词
-            let filteredWords = words.filter(w => {
-                if (isFullMode) {
-                    return w.weight >= -1; // 全量模式：显示-1及以上
-                } else {
-                    return w.weight >= 0; // 日常模式：只显示正数权重
-                }
-            });
-
-            if (filteredWords.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📚</div>
-                        <div>${isFullMode ? '暂无单词' : '暂无需要复习的单词'}</div>
-                    </div>
-                `;
-                return;
-            }
-
-            // 按权重分组
-            const groups = {};
-            filteredWords.forEach(w => {
-                if (!groups[w.weight]) {
-                    groups[w.weight] = [];
-                }
-                groups[w.weight].push(w);
-            });
-
-            // 对每组内的单词按字母排序
-            Object.keys(groups).forEach(weight => {
-                groups[weight].sort((a, b) => a.word.localeCompare(b.word));
-            });
-
-            // 按权重降序排列组
-            const sortedWeights = Object.keys(groups).map(Number).sort((a, b) => b - a);
-
-            let html = '';
-            sortedWeights.forEach(weight => {
-                const groupWords = groups[weight];
-                const isMastered = weight < 0;
-                
-                const groupLabel = weight >= 5 ? `权重 ${weight} - 最难` :
-                                  weight === 4 ? `权重 ${weight} - 较难` :
-                                  weight === 3 ? `权重 ${weight} - 需精记` :
-                                  weight === 2 ? `权重 ${weight} - 一般` :
-                                  weight === 1 ? `权重 ${weight} - 只需看懂` :
-                                  weight === 0 ? `权重 ${weight} - 基本掌握` :
-                                  weight === -1 ? `权重 ${weight} - 完全掌握` :
-                                  `权重 ${weight} - 过于简单`;
-
-                if (isMastered) {
-                    // 可折叠的已掌握区域
-                    html += `
-                        <div class="word-group">
-                            <div class="collapsible-header" onclick="toggleCollapse(this)">
-                                <div class="group-header" style="margin-bottom: 0; border: none;">${groupLabel} (${groupWords.length})</div>
-                                <div class="collapse-icon">▼</div>
-                            </div>
-                            <div class="collapsible-content">
-                    `;
-                } else {
-                    html += `
-                        <div class="word-group">
-                            <div class="group-header">${groupLabel} (${groupWords.length})</div>
-                    `;
-                }
-
-                groupWords.forEach(w => {
-                    const originalIndex = words.indexOf(w);
-                    const weightClass = weight >= 0 ? `weight-${Math.min(weight, 5)}` : '';
-                    const masteredClass = isMastered ? 'mastered' : '';
-
-                    html += `
-                        <div class="word-item ${weightClass} ${masteredClass}">
-                            <div class="word-header">
-                                <div>
-                                    <span class="word-title">${w.word}</span>
-                                    ${w.pos ? `<span class="word-pos">${w.pos}</span>` : ''}
-                                </div>
-                                <div class="word-weight">${w.weight}</div>
-                            </div>
-                            <div class="word-meaning">${w.meaning}</div>
-                            <div class="word-actions">
-                                ${w.weight >= 0 ? `<button class="btn-remember" onclick="updateWeight(${originalIndex}, -1)">记住了 ↓</button>` : ''}
-                                ${w.weight >= -1 && w.weight < 10 ? `<button class="btn-forget" onclick="updateWeight(${originalIndex}, 1)">没记住 ↑</button>` : ''}
-                                <button class="btn-delete" onclick="deleteWord(${originalIndex})">删除</button>
-                            </div>
-                        </div>
-                    `;
-                });
-
-                if (isMastered) {
-                    html += `
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    html += `</div>`;
-                }
-            });
-
-            container.innerHTML = html;
-        }
-
-        // 折叠切换
-        function toggleCollapse(header) {
-            const content = header.nextElementSibling;
-            const icon = header.querySelector('.collapse-icon');
-            
-            content.classList.toggle('expanded');
-            icon.classList.toggle('expanded');
-        }
-
-        // 数据持久化
-        function saveData() {
-            localStorage.setItem('wordMemoryData', JSON.stringify(words));
-        }
-
-        function loadData() {
-            const saved = localStorage.getItem('wordMemoryData');
-            if (saved) {
-                words = JSON.parse(saved);
-            }
-        }
-
-        // 导出数据
-        function exportData() {
-            const dataStr = JSON.stringify(words, null, 2);
-            const blob = new Blob([dataStr], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `word-memory-${new Date().toISOString().split('T')[0]}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-        }
-
-        // 导入数据
-        function importData(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const imported = JSON.parse(e.target.result);
-                    if (Array.isArray(imported)) {
-                        if (confirm(`确定导入 ${imported.length} 个单词吗？这将覆盖当前数据。`)) {
-                            words = imported;
-                            saveData();
-                            renderWords();
-                        }
-                    } else {
-                        alert('文件格式错误');
-                    }
-                } catch (error) {
-                    alert('文件解析失败');
-                }
-                event.target.value = ''; // 清空文件选择
-            };
-            reader.readAsText(file);
-        }
-
-        // 回车添加单词
-        document.getElementById('wordInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') addWord();
-        });
-        document.getElementById('meaningInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') addWord();
-        });
-        document.getElementById('posInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') addWord();
-        });
-    </script>
+    <script src="script.js"></script>
 </body>
 </html>

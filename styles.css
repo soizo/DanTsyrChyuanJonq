@@ -1,0 +1,564 @@
+/* ========================================
+   MUJI-Inspired Minimal Design System
+   ======================================== */
+
+:root {
+    /* Simplified Color Palette */
+    --color-bg: #F5F4F0;
+    --color-surface: #FFFFFF;
+    --color-text: #333333;
+    --color-text-light: #999999;
+    --color-border: #D8D8D8;
+    --color-line: #E8E8E8;
+    --color-accent: #8B7355;
+
+    /* Spacing */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 48px;
+
+    /* Radius */
+    --radius: 2px;
+}
+
+/* ========================================
+   Base
+   ======================================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Arial', sans-serif;
+    background: var(--color-bg);
+    color: var(--color-text);
+    line-height: 1.6;
+    font-size: 14px;
+    font-weight: 500;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ========================================
+   Container
+   ======================================== */
+
+.container {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: var(--space-2xl) var(--space-lg);
+    min-height: 100vh;
+}
+
+/* ========================================
+   Header
+   ======================================== */
+
+h1 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    margin-bottom: var(--space-2xl);
+    text-align: center;
+    color: var(--color-text);
+    text-transform: uppercase;
+}
+
+/* ========================================
+   Mode Switch
+   ======================================== */
+
+.mode-switch {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: var(--space-md);
+    margin-bottom: var(--space-2xl);
+    padding: var(--space-md);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+}
+
+.mode-switch label {
+    font-size: 11px;
+    color: var(--color-text-light);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.toggle {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: var(--color-border);
+    cursor: pointer;
+}
+
+.toggle.active {
+    background: var(--color-text);
+}
+
+.toggle-slider {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: white;
+}
+
+.toggle.active .toggle-slider {
+    left: 22px;
+}
+
+/* ========================================
+   Form
+   ======================================== */
+
+.add-form {
+    background: var(--color-surface);
+    padding: var(--space-lg);
+    border: 1px solid var(--color-border);
+    margin-bottom: var(--space-lg);
+}
+
+.form-row {
+    margin-bottom: var(--space-md);
+}
+
+.form-row:last-child {
+    margin-bottom: 0;
+}
+
+.form-row label {
+    display: block;
+    font-size: 10px;
+    color: var(--color-text-light);
+    margin-bottom: var(--space-sm);
+    letter-spacing: 0.12em;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+input[type="text"],
+input[type="date"],
+select {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    font-size: 14px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: inherit;
+    font-weight: 500;
+}
+
+input[type="text"]:focus,
+input[type="date"]:focus,
+select:focus {
+    outline: none;
+    border-color: var(--color-text);
+    background: var(--color-surface);
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+}
+
+.form-grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--space-md);
+}
+
+/* ========================================
+   Buttons
+   ======================================== */
+
+button {
+    width: 100%;
+    padding: var(--space-md);
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    font-family: inherit;
+    margin-top: var(--space-md);
+    text-transform: uppercase;
+}
+
+.btn-primary {
+    background: var(--color-text);
+    color: var(--color-surface);
+    border-color: var(--color-text);
+}
+
+.btn-primary:active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+}
+
+.btn-secondary {
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+
+.btn-secondary:active {
+    background: var(--color-bg);
+}
+
+/* ========================================
+   Data Controls
+   ======================================== */
+
+.data-controls {
+    display: flex;
+    gap: var(--space-md);
+    margin-bottom: var(--space-2xl);
+}
+
+.data-controls button {
+    margin-top: 0;
+}
+
+/* ========================================
+   Word List
+   ======================================== */
+
+.word-group {
+    margin-bottom: var(--space-2xl);
+}
+
+.group-header {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--color-text-light);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--color-line);
+}
+
+.word-item {
+    background: var(--color-surface);
+    padding: var(--space-lg);
+    margin-bottom: 1px;
+    border: 1px solid var(--color-border);
+    border-left: 2px solid var(--color-text);
+}
+
+.word-item:last-child {
+    margin-bottom: 0;
+}
+
+.word-item.mastered {
+    opacity: 0.5;
+    border-left-color: var(--color-border);
+}
+
+.word-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--space-sm);
+}
+
+.word-title {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.word-pos {
+    font-size: 9px;
+    color: var(--color-text-light);
+    margin-left: var(--space-sm);
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.word-weight {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--color-text-light);
+    min-width: 20px;
+    text-align: center;
+    padding: 2px var(--space-sm);
+    background: transparent;
+    border: 1px solid var(--color-border);
+    letter-spacing: 0.05em;
+}
+
+.word-meaning {
+    font-size: 14px;
+    color: var(--color-text-light);
+    margin-bottom: var(--space-sm);
+    line-height: 1.6;
+    font-weight: 500;
+}
+
+.word-meta {
+    font-size: 9px;
+    color: var(--color-text-light);
+    margin-bottom: var(--space-md);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.word-actions {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.word-actions button {
+    flex: 1;
+    padding: var(--space-sm);
+    font-size: 9px;
+    margin-top: 0;
+}
+
+.btn-remember {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+}
+
+.btn-remember:active {
+    background: var(--color-text);
+    color: var(--color-surface);
+}
+
+.btn-forget {
+    background: var(--color-surface);
+    color: var(--color-text-light);
+    border: 1px solid var(--color-border);
+}
+
+.btn-forget:active {
+    background: var(--color-bg);
+}
+
+.btn-delete,
+.btn-edit {
+    background: var(--color-surface);
+    color: var(--color-text-light);
+    border: 1px solid var(--color-border);
+    flex: 0 0 auto;
+    min-width: 50px;
+}
+
+.btn-delete:active,
+.btn-edit:active {
+    background: var(--color-text);
+    color: var(--color-surface);
+}
+
+/* ========================================
+   Collapsible
+   ======================================== */
+
+.collapsible-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-sm) 0;
+    cursor: pointer;
+    user-select: none;
+}
+
+.collapse-icon {
+    font-size: 10px;
+    color: var(--color-text-light);
+    font-weight: 600;
+}
+
+.collapsible-content {
+    max-height: 0;
+    overflow: hidden;
+}
+
+.collapsible-content.expanded {
+    max-height: 5000px;
+}
+
+/* ========================================
+   Empty State
+   ======================================== */
+
+.empty-state {
+    text-align: center;
+    padding: var(--space-2xl) var(--space-lg);
+    color: var(--color-text-light);
+}
+
+.empty-state-icon {
+    font-size: 24px;
+    margin-bottom: var(--space-md);
+    opacity: 0.3;
+    font-weight: 400;
+}
+
+.empty-state div {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+/* ========================================
+   Modal
+   ======================================== */
+
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    padding: var(--space-lg);
+    align-items: center;
+    justify-content: center;
+}
+
+.modal.active {
+    display: flex;
+}
+
+.modal-content {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    max-width: 500px;
+    width: 100%;
+    padding: var(--space-lg);
+}
+
+.modal-header {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    margin-bottom: var(--space-lg);
+    text-transform: uppercase;
+}
+
+.modal-actions {
+    display: flex;
+    gap: var(--space-sm);
+    margin-top: var(--space-lg);
+}
+
+.modal-actions button {
+    margin-top: 0;
+}
+
+/* ========================================
+   Hidden
+   ======================================== */
+
+#importFile {
+    display: none;
+}
+
+/* ========================================
+   Responsive
+   ======================================== */
+
+@media (min-width: 768px) {
+    .container {
+        padding: var(--space-2xl);
+    }
+}
+
+@media (max-width: 480px) {
+    .container {
+        padding: var(--space-lg) var(--space-md);
+    }
+
+    .form-grid,
+    .form-grid-3 {
+        grid-template-columns: 1fr;
+    }
+
+    .data-controls {
+        flex-direction: column;
+    }
+}
+
+/* iPad Landscape */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: landscape) {
+    .container {
+        max-width: 100%;
+        padding: var(--space-lg) var(--space-2xl);
+    }
+
+    .add-form {
+        max-width: 600px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
+
+/* ========================================
+   Dark Mode
+   ======================================== */
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --color-bg: #1A1A1A;
+        --color-surface: #222222;
+        --color-text: #D8D8D8;
+        --color-text-light: #888888;
+        --color-border: #3A3A3A;
+        --color-line: #2A2A2A;
+        --color-accent: #A89885;
+    }
+}
+
+/* ========================================
+   Touch Optimization
+   ======================================== */
+
+@media (hover: none) and (pointer: coarse) {
+    button {
+        min-height: 44px;
+    }
+}
+
+/* ========================================
+   Print
+   ======================================== */
+
+@media print {
+    body {
+        background: white;
+    }
+
+    .add-form,
+    .data-controls,
+    .word-actions,
+    .mode-switch {
+        display: none;
+    }
+
+    .word-item {
+        break-inside: avoid;
+    }
+}
