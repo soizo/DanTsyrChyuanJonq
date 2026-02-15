@@ -19,136 +19,154 @@
             <img src="assets/title.png" alt="Dan Tsyr Chyuan Jonq">
         </h1>
 
-        <!-- Mode Switch -->
-        <div class="mode-switch">
-            <label>Daily</label>
-            <div class="toggle" id="modeToggle" tabindex="0">
-                <div class="toggle-slider"></div>
-            </div>
-            <label>Full</label>
-        </div>
+        <div class="workspace-layout" id="workspaceLayout">
+            <div class="workspace-left">
+                <!-- Mode Switch -->
+                <div class="mode-switch">
+                    <label>Daily</label>
+                    <div class="toggle" id="modeToggle" tabindex="0">
+                        <div class="toggle-slider"></div>
+                    </div>
+                    <label>Full</label>
+                </div>
 
-        <!-- Status Indicator -->
-        <div class="status-indicator" id="statusIndicator"></div>
+                <!-- Status Indicator -->
+                <div class="status-indicator" id="statusIndicator"></div>
 
-        <!-- Add Word Form -->
-        <div class="add-form">
-            <div class="form-row">
-                <label>Word</label>
-                <input type="text" id="wordInput" required>
-            </div>
-            <div class="form-row">
-                <label>Meaning</label>
-                <input type="text" id="meaningInput">
-            </div>
-            <div class="form-grid-3">
-                <div class="form-row">
-                    <label>POS</label>
-                    <div class="dropdown-container pos-selector" id="posSelector">
-                        <div class="dropdown-selected pos-selected" id="posSelected">
-                            <span class="pos-placeholder">Select...</span>
+                <!-- Add Word Form -->
+                <div class="add-form">
+                    <div class="form-row">
+                        <label>Word</label>
+                        <input type="text" id="wordInput" required>
+                    </div>
+                    <div class="form-row">
+                        <label>Meaning</label>
+                        <input type="text" id="meaningInput">
+                    </div>
+                    <div class="form-grid-3">
+                        <div class="form-row">
+                            <label>POS</label>
+                            <div class="dropdown-container pos-selector" id="posSelector">
+                                <div class="dropdown-selected pos-selected" id="posSelected">
+                                    <span class="pos-placeholder">Select...</span>
+                                </div>
+                                <div class="dropdown-menu pos-dropdown" id="posDropdown">
+                                    <label class="dropdown-option pos-option" data-value="n" onclick="togglePosOption(this, event)">n.</label>
+                                    <label class="dropdown-option pos-option" data-value="v" onclick="togglePosOption(this, event)">v.</label>
+                                    <label class="dropdown-option pos-option" data-value="adj" onclick="togglePosOption(this, event)">adj.</label>
+                                    <label class="dropdown-option pos-option" data-value="adv" onclick="togglePosOption(this, event)">adv.</label>
+                                    <label class="dropdown-option pos-option" data-value="prep" onclick="togglePosOption(this, event)">prep.</label>
+                                    <label class="dropdown-option pos-option" data-value="conj" onclick="togglePosOption(this, event)">conj.</label>
+                                    <label class="dropdown-option pos-option" data-value="pron" onclick="togglePosOption(this, event)">pron.</label>
+                                </div>
+                            </div>
                         </div>
-                        <div class="dropdown-menu pos-dropdown" id="posDropdown">
-                            <label class="dropdown-option pos-option" data-value="n" onclick="togglePosOption(this, event)">n.</label>
-                            <label class="dropdown-option pos-option" data-value="v" onclick="togglePosOption(this, event)">v.</label>
-                            <label class="dropdown-option pos-option" data-value="adj" onclick="togglePosOption(this, event)">adj.</label>
-                            <label class="dropdown-option pos-option" data-value="adv" onclick="togglePosOption(this, event)">adv.</label>
-                            <label class="dropdown-option pos-option" data-value="prep" onclick="togglePosOption(this, event)">prep.</label>
-                            <label class="dropdown-option pos-option" data-value="conj" onclick="togglePosOption(this, event)">conj.</label>
-                            <label class="dropdown-option pos-option" data-value="pron" onclick="togglePosOption(this, event)">pron.</label>
+                        <div class="form-row">
+                            <label>Weight</label>
+                            <div class="dropdown-container weight-selector" id="weightSelector">
+                                <div class="dropdown-selected weight-selected" id="weightSelected">
+                                    3
+                                </div>
+                                <div class="dropdown-menu weight-dropdown" id="weightDropdown">
+                                    <label class="dropdown-option weight-option" data-value="5" onclick="setWeightOption(this, event)">5</label>
+                                    <label class="dropdown-option weight-option" data-value="4" onclick="setWeightOption(this, event)">4</label>
+                                    <label class="dropdown-option weight-option selected" data-value="3" onclick="setWeightOption(this, event)">3</label>
+                                    <label class="dropdown-option weight-option" data-value="2" onclick="setWeightOption(this, event)">2</label>
+                                    <label class="dropdown-option weight-option" data-value="1" onclick="setWeightOption(this, event)">1</label>
+                                    <label class="dropdown-option weight-option" data-value="0" onclick="setWeightOption(this, event)">0</label>
+                                    <label class="dropdown-option weight-option" data-value="-1" onclick="setWeightOption(this, event)">-1</label>
+                                    <label class="dropdown-option weight-option" data-value="-2" onclick="setWeightOption(this, event)">-2</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <label>Date</label>
+                            <input type="date" id="dateInput" class="range-input-date">
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="addWord()">Add</button>
+                </div>
+
+                <!-- Data Controls -->
+                <div class="data-controls">
+                    <button class="btn-secondary" onclick="manualSave()">Save</button>
+                    <button class="btn-secondary" onclick="exportData()">Export</button>
+                    <button class="btn-secondary" onclick="document.getElementById('importFile').click()">Import</button>
+                    <button class="btn-secondary" id="selectModeBtn" onclick="toggleSelectMode()">Select Words</button>
+                    <button class="btn-secondary" onclick="openSettingsModal()">Settings</button>
+                    <input type="file" id="importFile" accept=".json" onchange="importData(event)">
+                </div>
+
+                <!-- Batch Operations Toolbar (hidden by default) -->
+                <div id="batchToolbar" class="batch-toolbar">
+                    <div class="batch-toolbar-section">
+                        <div class="batch-toolbar-label">Select:</div>
+                        <div class="batch-toolbar-controls">
+                            <button class="btn-batch" onclick="selectAll()">All</button>
+                            <button class="btn-batch" onclick="selectNone()">None</button>
+                            <button class="btn-batch" onclick="selectInvert()">Invert</button>
+                        </div>
+                    </div>
+                    <div class="batch-toolbar-section">
+                        <div class="batch-toolbar-label">Weight:</div>
+                        <div class="batch-toolbar-controls">
+                            <div class="range-input-group">
+                                <input type="number" id="weightMinInput" class="range-input" value="-3" min="-3">
+                                <span class="range-separator">~</span>
+                                <input type="number" id="weightMaxInput" class="range-input" placeholder="∞">
+                            </div>
+                            <button class="btn-batch btn-batch-add" onclick="addWeightRange()">+</button>
+                            <button class="btn-batch btn-batch-remove" onclick="removeWeightRange()">−</button>
+                        </div>
+                    </div>
+                    <div class="batch-toolbar-section">
+                        <div class="batch-toolbar-label">Date:</div>
+                        <div class="batch-toolbar-controls">
+                            <div class="range-input-group">
+                                <input type="date" id="dateMinInput" class="range-input range-input-date">
+                                <span class="range-separator">~</span>
+                                <input type="date" id="dateMaxInput" class="range-input range-input-date">
+                            </div>
+                            <button class="btn-batch btn-batch-add" onclick="addDateRange()">+</button>
+                            <button class="btn-batch btn-batch-remove" onclick="removeDateRange()">−</button>
+                        </div>
+                    </div>
+                    <div class="batch-toolbar-section">
+                        <div class="batch-toolbar-label">Regex:</div>
+                        <div class="batch-toolbar-controls">
+                            <input type="text" id="regexFilterInput" class="regex-input" placeholder="e.g. ^un.*ing$">
+                            <button class="btn-batch btn-batch-add" onclick="selectByRegex()">+</button>
+                            <button class="btn-batch btn-batch-remove" onclick="deselectByRegex()">−</button>
+                        </div>
+                    </div>
+                    <div class="batch-toolbar-section">
+                        <div class="batch-toolbar-label">Actions:</div>
+                        <div class="batch-toolbar-controls">
+                            <button class="btn-batch btn-batch-up" onclick="batchAdjustWeight(1)" id="batchUpBtn" disabled>Up</button>
+                            <button class="btn-batch btn-batch-down" onclick="batchAdjustWeight(-1)" id="batchDownBtn" disabled>Down</button>
+                            <button class="btn-batch btn-batch-delete" onclick="batchDeleteConfirm()" id="batchDeleteBtn" disabled>Delete</button>
                         </div>
                     </div>
                 </div>
-                <div class="form-row">
-                    <label>Weight</label>
-                    <div class="dropdown-container weight-selector" id="weightSelector">
-                        <div class="dropdown-selected weight-selected" id="weightSelected">
-                            3
-                        </div>
-                        <div class="dropdown-menu weight-dropdown" id="weightDropdown">
-                            <label class="dropdown-option weight-option" data-value="5" onclick="setWeightOption(this, event)">5</label>
-                            <label class="dropdown-option weight-option" data-value="4" onclick="setWeightOption(this, event)">4</label>
-                            <label class="dropdown-option weight-option selected" data-value="3" onclick="setWeightOption(this, event)">3</label>
-                            <label class="dropdown-option weight-option" data-value="2" onclick="setWeightOption(this, event)">2</label>
-                            <label class="dropdown-option weight-option" data-value="1" onclick="setWeightOption(this, event)">1</label>
-                            <label class="dropdown-option weight-option" data-value="0" onclick="setWeightOption(this, event)">0</label>
-                            <label class="dropdown-option weight-option" data-value="-1" onclick="setWeightOption(this, event)">-1</label>
-                            <label class="dropdown-option weight-option" data-value="-2" onclick="setWeightOption(this, event)">-2</label>
-                        </div>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <label>Date</label>
-                    <input type="date" id="dateInput">
-                </div>
             </div>
-            <button class="btn-primary" onclick="addWord()">Add</button>
-        </div>
 
-        <!-- Data Controls -->
-        <div class="data-controls">
-            <button class="btn-secondary" onclick="manualSave()">Save</button>
-            <button class="btn-secondary" onclick="exportData()">Export</button>
-            <button class="btn-secondary" onclick="document.getElementById('importFile').click()">Import</button>
-            <button class="btn-secondary" id="selectModeBtn" onclick="toggleSelectMode()">Select Words</button>
-            <button class="btn-secondary" onclick="openSettingsModal()">Settings</button>
-            <input type="file" id="importFile" accept=".json" onchange="importData(event)">
-        </div>
+            <div
+                class="layout-divider"
+                id="layoutDivider"
+                role="separator"
+                tabindex="0"
+                aria-label="Adjust layout split"
+                aria-orientation="vertical"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="50"
+            ></div>
 
-        <!-- Batch Operations Toolbar (hidden by default) -->
-        <div id="batchToolbar" class="batch-toolbar">
-            <div class="batch-toolbar-section">
-                <div class="batch-toolbar-label">Select:</div>
-                <div class="batch-toolbar-controls">
-                    <button class="btn-batch" onclick="selectAll()">All</button>
-                    <button class="btn-batch" onclick="selectNone()">None</button>
-                    <button class="btn-batch" onclick="selectInvert()">Invert</button>
-                </div>
-            </div>
-            <div class="batch-toolbar-section">
-                <div class="batch-toolbar-label">Weight:</div>
-                <div class="batch-toolbar-controls">
-                    <div class="range-input-group">
-                        <input type="number" id="weightMinInput" class="range-input" value="-3" min="-3">
-                        <span class="range-separator">~</span>
-                        <input type="number" id="weightMaxInput" class="range-input" placeholder="∞">
-                    </div>
-                    <button class="btn-batch btn-batch-add" onclick="addWeightRange()">+</button>
-                    <button class="btn-batch btn-batch-remove" onclick="removeWeightRange()">−</button>
-                </div>
-            </div>
-            <div class="batch-toolbar-section">
-                <div class="batch-toolbar-label">Date:</div>
-                <div class="batch-toolbar-controls">
-                    <div class="range-input-group">
-                        <input type="date" id="dateMinInput" class="range-input range-input-date">
-                        <span class="range-separator">~</span>
-                        <input type="date" id="dateMaxInput" class="range-input range-input-date">
-                    </div>
-                    <button class="btn-batch btn-batch-add" onclick="addDateRange()">+</button>
-                    <button class="btn-batch btn-batch-remove" onclick="removeDateRange()">−</button>
-                </div>
-            </div>
-            <div class="batch-toolbar-section">
-                <div class="batch-toolbar-label">Regex:</div>
-                <div class="batch-toolbar-controls">
-                    <input type="text" id="regexFilterInput" class="regex-input" placeholder="e.g. ^un.*ing$">
-                    <button class="btn-batch btn-batch-add" onclick="selectByRegex()">+</button>
-                    <button class="btn-batch btn-batch-remove" onclick="deselectByRegex()">−</button>
-                </div>
-            </div>
-            <div class="batch-toolbar-section">
-                <div class="batch-toolbar-label">Actions:</div>
-                <div class="batch-toolbar-controls">
-                    <button class="btn-batch btn-batch-up" onclick="batchAdjustWeight(1)" id="batchUpBtn" disabled>Up</button>
-                    <button class="btn-batch btn-batch-down" onclick="batchAdjustWeight(-1)" id="batchDownBtn" disabled>Down</button>
-                    <button class="btn-batch btn-batch-delete" onclick="batchDeleteConfirm()" id="batchDeleteBtn" disabled>Delete</button>
-                </div>
+            <div class="workspace-right">
+                <!-- Word List -->
+                <div id="wordList"></div>
             </div>
         </div>
-
-        <!-- Word List -->
-        <div id="wordList"></div>
     </div>
 
     <!-- Edit Modal -->

@@ -399,6 +399,13 @@ let versionControl = null;
 const SPEAKER_ICON_SVG = '<svg class="icon-speaker" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 10v4c0 1.1.9 2 2 2h2.35l3.38 2.7c.93.74 2.27.08 2.27-1.1V6.4c0-1.18-1.34-1.84-2.27-1.1L7.35 8H5c-1.1 0-2 .9-2 2Zm14.5 2c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03ZM15 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/></svg>';
 const DATE_INPUT_ICON_ONLY_THRESHOLD = 120;
 let dateInputResizeObserver = null;
+const LAYOUT_BREAKPOINT_QUERY = '(min-width: 768px)';
+const LAYOUT_DESKTOP_POINTER_QUERY = '(hover: hover) and (pointer: fine)';
+const LAYOUT_SPLIT_STORAGE_KEY = 'wordMemoryLayoutSplitRatio';
+const LAYOUT_MIN_PANEL_WIDTH = 320;
+const LAYOUT_KEYBOARD_STEP = 0.02;
+const LAYOUT_DEFAULT_HANDLE_HEIGHT = 20;
+let layoutSplitRatio = 0.5;
 
 // Dropdown Base Class
 class Dropdown {
@@ -661,6 +668,209 @@ function initResponsiveDateInputs() {
     }
 }
 
+function clampLayoutValue(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
+
+function loadLayoutSplitRatio() {
+    try {
+        const raw = localStorage.getItem(LAYOUT_SPLIT_STORAGE_KEY);
+        const parsed = raw ? Number(raw) : NaN;
+        if (!Number.isFinite(parsed)) {
+            return 0.5;
+        }
+        return clampLayoutValue(parsed, 0, 1);
+    } catch (error) {
+        return 0.5;
+    }
+}
+
+function saveLayoutSplitRatio(ratio) {
+    try {
+        localStorage.setItem(LAYOUT_SPLIT_STORAGE_KEY, String(clampLayoutValue(ratio, 0, 1)));
+    } catch (error) {
+        console.warn('Failed to save layout split ratio:', error);
+    }
+}
+
+function setLayoutSplitRatio(layout, divider, ratio) {
+    if (!layout || !divider) return;
+
+    const totalWidth = layout.getBoundingClientRect().width;
+    const dividerWidth = divider.getBoundingClientRect().width || 12;
+    const availableWidth = Math.max(0, totalWidth - dividerWidth);
+    if (availableWidth <= 0) return;
+
+    let minLeft = LAYOUT_MIN_PANEL_WIDTH;
+    let maxLeft = availableWidth - LAYOUT_MIN_PANEL_WIDTH;
+
+    // If viewport is too narrow to keep both panes at min width, fall back to 50/50.
+    if (maxLeft < minLeft) {
+        minLeft = availableWidth / 2;
+        maxLeft = availableWidth / 2;
+    }
+
+    const clampedRatio = clampLayoutValue(ratio, 0, 1);
+    const desiredLeft = availableWidth * clampedRatio;
+    const leftWidth = clampLayoutValue(desiredLeft, minLeft, maxLeft);
+    const normalizedRatio = availableWidth > 0 ? (leftWidth / availableWidth) : 0.5;
+
+    layout.style.setProperty('--workspace-left-width', `${leftWidth}px`);
+    layoutSplitRatio = normalizedRatio;
+    divider.setAttribute('aria-valuenow', String(Math.round(normalizedRatio * 100)));
+}
+
+function getLayoutDividerHandleHeight(divider) {
+    if (!divider) return LAYOUT_DEFAULT_HANDLE_HEIGHT;
+
+    const raw = window.getComputedStyle(divider).getPropertyValue('--layout-divider-handle-height');
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return LAYOUT_DEFAULT_HANDLE_HEIGHT;
+    }
+    return parsed;
+}
+
+function setLayoutDividerHandleFromClientY(divider, clientY) {
+    if (!divider) return;
+
+    const rect = divider.getBoundingClientRect();
+    const handleHeight = getLayoutDividerHandleHeight(divider);
+    const maxTop = Math.max(0, rect.height - handleHeight);
+    const targetTop = clientY - rect.top - (handleHeight / 2);
+    const clampedTop = clampLayoutValue(targetTop, 0, maxTop);
+    divider.style.setProperty('--layout-divider-handle-top', `${clampedTop}px`);
+}
+
+function syncLayoutDividerHandlePosition(divider, isWideLayout) {
+    if (!divider) return;
+
+    if (!isWideLayout) {
+        divider.style.removeProperty('--layout-divider-handle-top');
+        return;
+    }
+
+    setLayoutDividerHandleFromClientY(divider, window.innerHeight / 2);
+}
+
+function initResizableLayout() {
+    const layout = document.getElementById('workspaceLayout');
+    const divider = document.getElementById('layoutDivider');
+    if (!layout || !divider) return;
+
+    layoutSplitRatio = loadLayoutSplitRatio();
+    const mediaQuery = window.matchMedia(LAYOUT_BREAKPOINT_QUERY);
+    const desktopPointerQuery = window.matchMedia(LAYOUT_DESKTOP_POINTER_QUERY);
+    let isResizing = false;
+
+    const applyLayout = () => {
+        if (!mediaQuery.matches) {
+            layout.style.removeProperty('--workspace-left-width');
+            divider.setAttribute('aria-valuenow', String(Math.round(layoutSplitRatio * 100)));
+            syncLayoutDividerHandlePosition(divider, false);
+            return;
+        }
+
+        setLayoutSplitRatio(layout, divider, layoutSplitRatio);
+        syncDateInputDisplayMode();
+        syncLayoutDividerHandlePosition(divider, true);
+    };
+
+    const handlePointerMove = (event) => {
+        if (!isResizing) return;
+        event.preventDefault();
+
+        const rect = layout.getBoundingClientRect();
+        const dividerWidth = divider.getBoundingClientRect().width || 12;
+        const availableWidth = Math.max(0, rect.width - dividerWidth);
+        if (availableWidth <= 0) return;
+
+        const rawLeft = event.clientX - rect.left;
+        const nextRatio = rawLeft / availableWidth;
+        setLayoutSplitRatio(layout, divider, nextRatio);
+        syncDateInputDisplayMode();
+    };
+
+    const stopResize = () => {
+        if (!isResizing) return;
+        isResizing = false;
+        divider.classList.remove('is-dragging');
+        document.body.classList.remove('is-resizing-layout');
+        saveLayoutSplitRatio(layoutSplitRatio);
+        syncLayoutDividerHandlePosition(divider, mediaQuery.matches);
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', stopResize);
+        window.removeEventListener('pointercancel', stopResize);
+    };
+
+    divider.addEventListener('pointerdown', (event) => {
+        if (!mediaQuery.matches) return;
+
+        event.preventDefault();
+        isResizing = true;
+        divider.classList.add('is-dragging');
+        document.body.classList.add('is-resizing-layout');
+        setLayoutDividerHandleFromClientY(divider, event.clientY);
+
+        if (typeof divider.setPointerCapture === 'function') {
+            try {
+                divider.setPointerCapture(event.pointerId);
+            } catch (error) {
+                // Some environments can reject pointer capture; dragging still works via window listeners.
+            }
+        }
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', stopResize);
+        window.addEventListener('pointercancel', stopResize);
+    });
+
+    divider.addEventListener('keydown', (event) => {
+        if (!mediaQuery.matches) return;
+
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+            return;
+        }
+
+        event.preventDefault();
+        const delta = event.key === 'ArrowLeft' ? -LAYOUT_KEYBOARD_STEP : LAYOUT_KEYBOARD_STEP;
+        setLayoutSplitRatio(layout, divider, layoutSplitRatio + delta);
+        saveLayoutSplitRatio(layoutSplitRatio);
+        syncDateInputDisplayMode();
+        syncLayoutDividerHandlePosition(divider, true);
+    });
+
+    const followPointerYInDivider = (event) => {
+        if (!mediaQuery.matches || !desktopPointerQuery.matches || isResizing) return;
+        if (event.pointerType && event.pointerType !== 'mouse') return;
+        setLayoutDividerHandleFromClientY(divider, event.clientY);
+    };
+
+    divider.addEventListener('pointerenter', followPointerYInDivider);
+    divider.addEventListener('pointermove', followPointerYInDivider);
+
+    divider.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        layoutSplitRatio = 0.5;
+        setLayoutSplitRatio(layout, divider, 0.5);
+        saveLayoutSplitRatio(0.5);
+        syncDateInputDisplayMode();
+        syncLayoutDividerHandlePosition(divider, mediaQuery.matches);
+    });
+
+    window.addEventListener('resize', applyLayout);
+    window.addEventListener('scroll', () => {
+        syncLayoutDividerHandlePosition(divider, mediaQuery.matches);
+    }, { passive: true });
+    if (typeof mediaQuery.addEventListener === 'function') {
+        mediaQuery.addEventListener('change', applyLayout);
+    } else if (typeof mediaQuery.addListener === 'function') {
+        mediaQuery.addListener(applyLayout);
+    }
+
+    applyLayout();
+}
+
 // Initialize
 window.onload = function() {
     loadData();
@@ -705,6 +915,7 @@ window.onload = function() {
     // Initialize batch toolbar
     updateBatchToolbar();
     initResponsiveDateInputs();
+    initResizableLayout();
 };
 
 // Mode toggle
@@ -920,6 +1131,7 @@ function addWord() {
     updateWeightSelection();
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('dateInput').value = today;
+    syncDateInputDisplayMode();
 }
 
 // Update weight
