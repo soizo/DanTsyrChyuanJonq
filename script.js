@@ -608,9 +608,21 @@ function initResponsiveDateInputs() {
     if (!dateInputs.length) return;
 
     dateInputs.forEach((input) => {
-        ensureDateCompactLabel(input);
+        const label = ensureDateCompactLabel(input);
 
         if (input.dataset.iconOnlyPickerBound === 'true') return;
+
+        // Make overlay label click through to the input on Safari
+        if (label) {
+            label.addEventListener('click', () => {
+                input.focus();
+                if (typeof input.showPicker === 'function') {
+                    try { input.showPicker(); } catch(e) {}
+                }
+            });
+            label.style.pointerEvents = 'auto';
+            label.style.cursor = 'pointer';
+        }
 
         input.addEventListener('click', (event) => {
             const isCustomDisplayMode = input.classList.contains('date-icon-only') ||
@@ -619,8 +631,12 @@ function initResponsiveDateInputs() {
             if (!isCustomDisplayMode) return;
 
             if (typeof input.showPicker === 'function') {
-                event.preventDefault();
-                input.showPicker();
+                try {
+                    event.preventDefault();
+                    input.showPicker();
+                } catch(e) {
+                    input.focus();
+                }
             } else {
                 input.focus();
             }

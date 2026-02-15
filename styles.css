@@ -48,6 +48,8 @@ body {
 	line-height: 1.6;
 	font-size: 14px;
 	font-weight: 500;
+	-webkit-text-size-adjust: 100%;
+	text-size-adjust: 100%;
 	padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
@@ -98,7 +100,7 @@ h1 img {
 	justify-content: center;
 	align-items: center;
 	gap: var(--space-md);
-	margin-bottom: var(--space-md);
+	margin-bottom: calc(var(--space-md) / 4);
 	padding: var(--space-md);
 	background: var(--color-surface);
 	border: 1px solid var(--color-border);
@@ -153,7 +155,7 @@ h1 img {
 	font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
 	color: var(--color-text-light);
 	margin-top: 0;
-	margin-bottom: var(--space-lg);
+	margin-bottom: calc(var(--space-lg) / 4);
 	height: 14px;
 	line-height: 14px;
 	letter-spacing: 0.02em;
@@ -213,12 +215,18 @@ select {
 	width: 100%;
 	min-width: 0;
 	padding: var(--space-sm) var(--space-md);
-	font-size: 14px;
+	font-size: 16px;
+	line-height: 1.2;
+	height: 38px;
 	border: 1px solid var(--color-border);
 	background: var(--color-bg);
 	color: var(--color-text);
 	font-family: inherit;
 	font-weight: 500;
+	border-radius: 0;
+	-webkit-appearance: none;
+	appearance: none;
+	box-sizing: border-box;
 }
 
 input[type="text"]:focus,
@@ -277,9 +285,10 @@ input[type="number"]::-webkit-inner-spin-button {
 	background: var(--color-bg);
 	color: var(--color-text);
 	cursor: pointer;
-	height: 34px;
+	height: 38px;
 	display: flex;
 	align-items: center;
+	box-sizing: border-box;
 }
 
 .dropdown-selected:hover {
@@ -448,6 +457,9 @@ button {
 	margin-top: var(--space-md);
 	text-transform: uppercase;
 	outline: none;
+	border-radius: 0;
+	-webkit-appearance: none;
+	appearance: none;
 }
 
 button:focus {
@@ -601,9 +613,11 @@ button:disabled {
 	color: var(--color-text);
 	text-align: center;
 	height: 30px;
+	min-height: 0;
 	margin-top: 0;
 	appearance: textfield;
 	-moz-appearance: textfield;
+	box-sizing: border-box;
 }
 
 #weightMinInput,
@@ -620,6 +634,9 @@ button:disabled {
 	font-size: 11px;
 	padding: 4px 4px;
 	letter-spacing: -0.02em;
+	height: 30px;
+	min-height: 0;
+	box-sizing: border-box;
 }
 
 .range-input-date-wrap {
@@ -634,6 +651,7 @@ button:disabled {
 	width: 100%;
 	min-width: 0;
 	height: 100%;
+	min-height: 0;
 }
 
 .range-input-date-compact-label {
@@ -642,13 +660,16 @@ button:disabled {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font: inherit;
-	color: inherit;
-	letter-spacing: inherit;
+	font-size: 11px;
+	font-weight: 500;
+	font-family: inherit;
+	color: var(--color-text);
+	letter-spacing: -0.02em;
 	line-height: 1;
 	pointer-events: none;
 	opacity: 0;
 	white-space: nowrap;
+	z-index: 1;
 }
 
 .range-input-date-compact-label.active {
@@ -661,8 +682,8 @@ button:disabled {
 .range-input-date.date-special-full {
 	position: relative;
 	color: transparent;
+	-webkit-text-fill-color: transparent;
 	caret-color: transparent;
-	text-indent: -9999px;
 	overflow: hidden;
 	padding-left: 2px;
 	padding-right: 2px;
@@ -676,6 +697,7 @@ button:disabled {
 	background-size: 14px 14px;
 }
 
+/* Chromium: hide native date text via pseudo-elements */
 .range-input-date.date-icon-only::-webkit-datetime-edit,
 .range-input-date.date-compact-value::-webkit-datetime-edit,
 .range-input-date.date-special-full::-webkit-datetime-edit {
@@ -700,6 +722,7 @@ button:disabled {
 	display: none;
 }
 
+/* Chromium: expand calendar picker indicator to full clickable area */
 .range-input-date.date-icon-only::-webkit-calendar-picker-indicator,
 .range-input-date.date-compact-value::-webkit-calendar-picker-indicator,
 .range-input-date.date-special-full::-webkit-calendar-picker-indicator {
@@ -711,6 +734,14 @@ button:disabled {
 	padding: 0;
 	opacity: 0;
 	cursor: pointer;
+}
+
+/* Safari/iOS: hide native date inner elements */
+.range-input-date.date-icon-only::-webkit-date-and-time-value,
+.range-input-date.date-compact-value::-webkit-date-and-time-value,
+.range-input-date.date-special-full::-webkit-date-and-time-value {
+	color: transparent;
+	-webkit-text-fill-color: transparent;
 }
 
 .range-input::-webkit-outer-spin-button,
@@ -768,6 +799,8 @@ button:disabled {
 	color: var(--color-text);
 	margin-top: 0;
 	height: 30px;
+	min-height: 0;
+	box-sizing: border-box;
 }
 
 .btn-batch-up {
@@ -1396,8 +1429,12 @@ button:disabled {
    ======================================== */
 
 @media (hover: none) and (pointer: coarse) {
-	button:not(.btn-batch) {
-		min-height: 44px;
+	button:not(.btn-batch):not(.btn-pronounce):not(.word-actions button) {
+		min-height: 40px;
+	}
+
+	.word-actions button {
+		min-height: 34px;
 	}
 }
 
