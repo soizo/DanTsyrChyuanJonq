@@ -98,31 +98,39 @@
         <div id="batchToolbar" class="batch-toolbar">
             <div class="batch-toolbar-section">
                 <div class="batch-toolbar-label">Select:</div>
-                <button class="btn-batch" onclick="selectAll()">All</button>
-                <button class="btn-batch" onclick="selectNone()">None</button>
-                <button class="btn-batch" onclick="selectInvert()">Invert</button>
+                <div class="batch-toolbar-controls">
+                    <button class="btn-batch" onclick="selectAll()">All</button>
+                    <button class="btn-batch" onclick="selectNone()">None</button>
+                    <button class="btn-batch" onclick="selectInvert()">Invert</button>
+                </div>
             </div>
             <div class="batch-toolbar-section">
                 <div class="batch-toolbar-label">Weight:</div>
-                <div class="range-input-group">
-                    <input type="number" id="weightMinInput" class="range-input" value="-3" min="-3">
-                    <span class="range-separator">~</span>
-                    <input type="number" id="weightMaxInput" class="range-input" placeholder="∞">
+                <div class="batch-toolbar-controls">
+                    <div class="range-input-group">
+                        <input type="number" id="weightMinInput" class="range-input" value="-3" min="-3">
+                        <span class="range-separator">~</span>
+                        <input type="number" id="weightMaxInput" class="range-input" placeholder="∞">
+                    </div>
+                    <button class="btn-batch btn-batch-add" onclick="addWeightRange()">+</button>
+                    <button class="btn-batch btn-batch-remove" onclick="removeWeightRange()">−</button>
                 </div>
-                <button class="btn-batch btn-batch-add" onclick="addWeightRange()">+</button>
-                <button class="btn-batch btn-batch-remove" onclick="removeWeightRange()">−</button>
             </div>
             <div class="batch-toolbar-section">
                 <div class="batch-toolbar-label">Regex:</div>
-                <input type="text" id="regexFilterInput" class="regex-input" placeholder="e.g. ^un.*ing$">
-                <button class="btn-batch btn-batch-add" onclick="selectByRegex()">+</button>
-                <button class="btn-batch btn-batch-remove" onclick="deselectByRegex()">−</button>
+                <div class="batch-toolbar-controls">
+                    <input type="text" id="regexFilterInput" class="regex-input" placeholder="e.g. ^un.*ing$">
+                    <button class="btn-batch btn-batch-add" onclick="selectByRegex()">+</button>
+                    <button class="btn-batch btn-batch-remove" onclick="deselectByRegex()">−</button>
+                </div>
             </div>
             <div class="batch-toolbar-section">
                 <div class="batch-toolbar-label">Actions:</div>
-                <button class="btn-batch btn-batch-up" onclick="batchAdjustWeight(1)" id="batchUpBtn" disabled>Up</button>
-                <button class="btn-batch btn-batch-down" onclick="batchAdjustWeight(-1)" id="batchDownBtn" disabled>Down</button>
-                <button class="btn-batch btn-batch-delete" onclick="batchDeleteConfirm()" id="batchDeleteBtn" disabled>Delete</button>
+                <div class="batch-toolbar-controls">
+                    <button class="btn-batch btn-batch-up" onclick="batchAdjustWeight(1)" id="batchUpBtn" disabled>Up</button>
+                    <button class="btn-batch btn-batch-down" onclick="batchAdjustWeight(-1)" id="batchDownBtn" disabled>Down</button>
+                    <button class="btn-batch btn-batch-delete" onclick="batchDeleteConfirm()" id="batchDeleteBtn" disabled>Delete</button>
+                </div>
             </div>
         </div>
 
