@@ -397,6 +397,8 @@ let isSelectMode = false;
 let versionControl = null;
 
 const SPEAKER_ICON_SVG = '<svg class="icon-speaker" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 10v4c0 1.1.9 2 2 2h2.35l3.38 2.7c.93.74 2.27.08 2.27-1.1V6.4c0-1.18-1.34-1.84-2.27-1.1L7.35 8H5c-1.1 0-2 .9-2 2Zm14.5 2c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03ZM15 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/></svg>';
+const DATE_INPUT_ICON_ONLY_THRESHOLD = 120;
+let dateInputResizeObserver = null;
 
 // Dropdown Base Class
 class Dropdown {
@@ -487,6 +489,162 @@ function showStatus(message, type = 'info') {
     }, 3000);
 }
 
+function ensureDateCompactLabel(input) {
+    if (!input || !input.parentElement) return null;
+
+    let wrapper = input.parentElement;
+    if (!wrapper.classList.contains('range-input-date-wrap')) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'range-input-date-wrap';
+        input.parentElement.insertBefore(wrapper, input);
+        wrapper.appendChild(input);
+    }
+
+    let label = wrapper.querySelector('.range-input-date-compact-label');
+    if (!label) {
+        label = document.createElement('span');
+        label.className = 'range-input-date-compact-label';
+        label.setAttribute('aria-hidden', 'true');
+        wrapper.appendChild(label);
+    }
+
+    return label;
+}
+
+function getRelativeDayOffset(isoDate) {
+    if (!isoDate) return null;
+
+    const parts = isoDate.split('-');
+    if (parts.length !== 3) return null;
+
+    const year = Number(parts[0]);
+    const month = Number(parts[1]);
+    const day = Number(parts[2]);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+        return null;
+    }
+
+    const targetDate = new Date(year, month - 1, day);
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const targetStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+    return Math.round((targetStart.getTime() - todayStart.getTime()) / 86400000);
+}
+
+function getSpecialDateLabel(isoDate, shortLabel = false) {
+    const diffDays = getRelativeDayOffset(isoDate);
+    if (diffDays === null) return '';
+
+    if (shortLabel) {
+        if (diffDays === 0) return 'TOD';
+        if (diffDays === 1) return 'TMR';
+        if (diffDays === -1) return 'YDA';
+        return '';
+    }
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Tomorrow';
+    if (diffDays === -1) return 'Yesterday';
+    return '';
+}
+
+function formatCompactDateLabel(isoDate) {
+    if (!isoDate) return '';
+
+    const specialShort = getSpecialDateLabel(isoDate, true);
+    if (specialShort) return specialShort;
+
+    const parts = isoDate.split('-');
+    if (parts.length !== 3) return isoDate;
+
+    const year = Number(parts[0]);
+    const month = Number(parts[1]);
+    const day = Number(parts[2]);
+
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+        return isoDate;
+    }
+
+    const currentYear = new Date().getFullYear();
+    if (year === currentYear) {
+        return `${month}-${day}`;
+    }
+
+    const sameCentury = Math.floor(year / 100) === Math.floor(currentYear / 100);
+    if (sameCentury) {
+        return `${String(year % 100).padStart(2, '0')}-${month}-${day}`;
+    }
+
+    return `${year}-${month}-${day}`;
+}
+
+function syncDateInputDisplayMode() {
+    const dateInputs = document.querySelectorAll('.range-input-date');
+
+    dateInputs.forEach((input) => {
+        const label = ensureDateCompactLabel(input);
+        const isNarrow = input.getBoundingClientRect().width <= DATE_INPUT_ICON_ONLY_THRESHOLD;
+        const hasValue = Boolean(input.value);
+        const isIconOnly = isNarrow && !hasValue;
+        const isCompactValue = isNarrow && hasValue;
+        const specialFullLabel = !isNarrow && hasValue ? getSpecialDateLabel(input.value, false) : '';
+        const isSpecialFull = Boolean(specialFullLabel);
+
+        input.classList.toggle('date-icon-only', isIconOnly);
+        input.classList.toggle('date-compact-value', isCompactValue);
+        input.classList.toggle('date-special-full', isSpecialFull);
+
+        if (label) {
+            label.textContent = isCompactValue ? formatCompactDateLabel(input.value) : (isSpecialFull ? specialFullLabel : '');
+            label.classList.toggle('active', isCompactValue || isSpecialFull);
+        }
+    });
+}
+
+function initResponsiveDateInputs() {
+    syncDateInputDisplayMode();
+
+    const dateInputs = document.querySelectorAll('.range-input-date');
+    if (!dateInputs.length) return;
+
+    dateInputs.forEach((input) => {
+        ensureDateCompactLabel(input);
+
+        if (input.dataset.iconOnlyPickerBound === 'true') return;
+
+        input.addEventListener('click', (event) => {
+            const isCustomDisplayMode = input.classList.contains('date-icon-only') ||
+                input.classList.contains('date-compact-value') ||
+                input.classList.contains('date-special-full');
+            if (!isCustomDisplayMode) return;
+
+            if (typeof input.showPicker === 'function') {
+                event.preventDefault();
+                input.showPicker();
+            } else {
+                input.focus();
+            }
+        });
+
+        input.addEventListener('change', syncDateInputDisplayMode);
+        input.addEventListener('input', syncDateInputDisplayMode);
+        input.dataset.iconOnlyPickerBound = 'true';
+    });
+
+    if (typeof ResizeObserver !== 'undefined') {
+        if (dateInputResizeObserver) {
+            dateInputResizeObserver.disconnect();
+        }
+
+        dateInputResizeObserver = new ResizeObserver(() => {
+            syncDateInputDisplayMode();
+        });
+        dateInputs.forEach((input) => dateInputResizeObserver.observe(input));
+    } else {
+        window.addEventListener('resize', syncDateInputDisplayMode);
+    }
+}
+
 // Initialize
 window.onload = function() {
     loadData();
@@ -530,6 +688,7 @@ window.onload = function() {
 
     // Initialize batch toolbar
     updateBatchToolbar();
+    initResponsiveDateInputs();
 };
 
 // Mode toggle
@@ -827,6 +986,10 @@ function updateBatchToolbar() {
     if (batchDeleteBtn) {
         batchDeleteBtn.disabled = !hasSelection;
         batchDeleteBtn.textContent = hasSelection ? `Delete (${selectedWords.size})` : 'Delete';
+    }
+
+    if (isSelectMode) {
+        requestAnimationFrame(syncDateInputDisplayMode);
     }
 }
 
