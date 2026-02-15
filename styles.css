@@ -613,6 +613,15 @@ button:disabled {
 	min-width: 0;
 }
 
+.range-input-date {
+	flex: 1 1 0;
+	width: 0;
+	min-width: 0;
+	font-size: 11px;
+	padding: 4px 4px;
+	letter-spacing: -0.02em;
+}
+
 .range-input::-webkit-outer-spin-button,
 .range-input::-webkit-inner-spin-button {
 	-webkit-appearance: none;

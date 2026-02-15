@@ -117,6 +117,18 @@
                 </div>
             </div>
             <div class="batch-toolbar-section">
+                <div class="batch-toolbar-label">Date:</div>
+                <div class="batch-toolbar-controls">
+                    <div class="range-input-group">
+                        <input type="date" id="dateMinInput" class="range-input range-input-date">
+                        <span class="range-separator">~</span>
+                        <input type="date" id="dateMaxInput" class="range-input range-input-date">
+                    </div>
+                    <button class="btn-batch btn-batch-add" onclick="addDateRange()">+</button>
+                    <button class="btn-batch btn-batch-remove" onclick="removeDateRange()">−</button>
+                </div>
+            </div>
+            <div class="batch-toolbar-section">
                 <div class="batch-toolbar-label">Regex:</div>
                 <div class="batch-toolbar-controls">
                     <input type="text" id="regexFilterInput" class="regex-input" placeholder="e.g. ^un.*ing$">

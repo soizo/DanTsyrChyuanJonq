@@ -940,6 +940,66 @@ function removeWeightRange() {
     showStatus(`−${count} word(s)`, 'success');
 }
 
+// Parse date range inputs
+function getDateRange() {
+    const minVal = document.getElementById('dateMinInput').value;
+    const maxVal = document.getElementById('dateMaxInput').value;
+
+    // At least one date must be provided
+    if (!minVal && !maxVal) return null;
+
+    return {
+        min: minVal || null,
+        max: maxVal || null
+    };
+}
+
+// Add date range to selection
+function addDateRange() {
+    const range = getDateRange();
+    if (!range) {
+        showStatus('Please set at least one date', 'error');
+        return;
+    }
+
+    let count = 0;
+    words.forEach((w, index) => {
+        const date = w.added;
+        if ((!range.min || date >= range.min) && (!range.max || date <= range.max)) {
+            selectedWords.add(index);
+            count++;
+        }
+    });
+
+    updateBatchToolbar();
+    updateWordSelectionUI();
+    showStatus(`+${count} word(s)`, 'success');
+}
+
+// Remove date range from selection
+function removeDateRange() {
+    const range = getDateRange();
+    if (!range) {
+        showStatus('Please set at least one date', 'error');
+        return;
+    }
+
+    let count = 0;
+    words.forEach((w, index) => {
+        const date = w.added;
+        if ((!range.min || date >= range.min) && (!range.max || date <= range.max)) {
+            if (selectedWords.has(index)) {
+                selectedWords.delete(index);
+                count++;
+            }
+        }
+    });
+
+    updateBatchToolbar();
+    updateWordSelectionUI();
+    showStatus(`−${count} word(s)`, 'success');
+}
+
 // Select by regex (add matching words to selection)
 function selectByRegex() {
     const pattern = document.getElementById('regexFilterInput').value.trim();
