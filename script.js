@@ -391,31 +391,10 @@ class VersionControl {
 // Data storage
 let words = [];
 let isFullMode = false;
-let hideMeaning = false;
 let editingIndex = -1;
 let selectedWords = new Set();
 let isSelectMode = false;
 let versionControl = null;
-let projectId = null;
-
-const PROJECT_ID_STORAGE_KEY = 'wordMemoryProjectId';
-
-function generateProjectId() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-
-function loadProjectId() {
-    projectId = localStorage.getItem(PROJECT_ID_STORAGE_KEY);
-    if (!projectId) {
-        projectId = generateProjectId();
-        localStorage.setItem(PROJECT_ID_STORAGE_KEY, projectId);
-    }
-    return projectId;
-}
-
-function getProjectId() {
-    return projectId || loadProjectId();
-}
 
 const SPEAKER_ICON_SVG = '<svg class="icon-speaker" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 10v4c0 1.1.9 2 2 2h2.35l3.38 2.7c.93.74 2.27.08 2.27-1.1V6.4c0-1.18-1.34-1.84-2.27-1.1L7.35 8H5c-1.1 0-2 .9-2 2Zm14.5 2c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03ZM15 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/></svg>';
 const DATE_INPUT_ICON_ONLY_THRESHOLD = 120;
@@ -907,7 +886,6 @@ function initResizableLayout() {
 
 // Initialize
 window.onload = function() {
-    loadProjectId();
     loadData();
 
     // Initialize version control
@@ -1796,11 +1774,7 @@ function loadData() {
 // Export data
 // Export data only (without version history)
 function exportDataOnly() {
-    const exportObj = {
-        projectId: getProjectId(),
-        words: words
-    };
-    const dataStr = JSON.stringify(exportObj, null, 2);
+    const dataStr = JSON.stringify(words, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1819,7 +1793,6 @@ function exportWithVersionHistory() {
     }
 
     const exportData = {
-        projectId: getProjectId(),
         words: words,
         versionHistory: {
             format: 'tree-v1',
@@ -1961,26 +1934,6 @@ function importWordsOnly(wordsData) {
     }
 }
 
-// Import as a new branch on current version (overwrite for same project)
-function importAsBranch(wordsData) {
-    const { processed, validCount, invalidCount } = processImportedWords(wordsData);
-    words = processed;
-
-    // Create a new version branching from current
-    if (versionControl) {
-        versionControl.createVersion(words, `Imported branch (${processed.length} words)`);
-    }
-
-    localStorage.setItem('wordMemoryData', JSON.stringify(words));
-    renderWords();
-
-    if (invalidCount > 0) {
-        showStatus(`Overwrite: ${validCount} valid, ${invalidCount} invalid (branch created)`, 'success');
-    } else {
-        showStatus(`Overwrite: ${processed.length} words (branch created)`, 'success');
-    }
-}
-
 // Import data with version history
 function importWithVersionHistory(importedData) {
     const { processed, validCount, invalidCount } = processImportedWords(importedData.words);
@@ -2019,66 +1972,35 @@ function importData(event) {
         try {
             const imported = JSON.parse(e.target.result);
 
-            // Extract words data for any format
-            let importedWords = null;
-            let importedProjectId = null;
-            let hasVersionHistory = false;
-
+            // Check if it contains version history
             if (imported.versionHistory) {
-                importedWords = imported.words;
-                importedProjectId = imported.projectId || null;
-                hasVersionHistory = true;
-            } else if (Array.isArray(imported)) {
-                importedWords = imported;
-            } else if (imported.words && Array.isArray(imported.words)) {
-                importedWords = imported.words;
-                importedProjectId = imported.projectId || null;
-            } else {
-                showStatus('Invalid file format', 'error');
-                event.target.value = '';
-                return;
-            }
-
-            if (!importedWords) {
-                showStatus('No words data found', 'error');
-                event.target.value = '';
-                return;
-            }
-
-            // Same project ID: ask to overwrite (creates branch)
-            const currentProjectId = getProjectId();
-            if (importedProjectId && importedProjectId === currentProjectId) {
-                if (confirm(`Same project detected. Overwrite current data?\n(${importedWords.length} words will be imported as a new branch)`)) {
-                    importAsBranch(importedWords);
-                }
-                event.target.value = '';
-                return;
-            }
-
-            // Different project or no project ID
-            if (hasVersionHistory) {
                 const validation = validateVersionHistory(imported.versionHistory);
 
                 if (!validation.valid) {
+                    // Version history is corrupted, ask user
                     if (confirm(`Version history is corrupted: ${validation.error}\n\nContinue importing data only (version history will be cleared)?`)) {
-                        importWordsOnly(importedWords);
+                        importWordsOnly(imported.words || imported);
                     }
                     event.target.value = '';
                     return;
                 }
 
-                if (confirm(`Import ${importedWords.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`)) {
+                // Version history is valid, ask user to confirm full import
+                if (confirm(`Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`)) {
                     importWithVersionHistory(imported);
-                    // Adopt the imported project ID
-                    if (importedProjectId) {
-                        projectId = importedProjectId;
-                        localStorage.setItem(PROJECT_ID_STORAGE_KEY, projectId);
-                    }
+                }
+            } else if (Array.isArray(imported)) {
+                // Old format - words array only
+                if (confirm(`Import ${imported.length} words? This will overwrite current data and clear version history.`)) {
+                    importWordsOnly(imported);
+                }
+            } else if (imported.words && Array.isArray(imported.words)) {
+                // Object with words array but no version history
+                if (confirm(`Import ${imported.words.length} words? This will overwrite current data and clear version history.`)) {
+                    importWordsOnly(imported.words);
                 }
             } else {
-                if (confirm(`Import ${importedWords.length} words? This will overwrite current data and clear version history.`)) {
-                    importWordsOnly(importedWords);
-                }
+                showStatus('Invalid file format', 'error');
             }
         } catch (error) {
             showStatus('Failed to parse file', 'error');
