@@ -259,22 +259,62 @@
         </div>
     </div>
 
-    <!-- History Modal -->
-    <div id="historyModal" class="modal">
-        <div class="modal-content modal-large">
-            <div class="modal-header">Version History</div>
-
-            <div class="version-info">
-                <span>Current: <span id="currentVersionIndex">-</span> / <span id="totalVersions">-</span></span>
-                <span>Can Undo: <span id="canUndo">-</span> | Can Redo: <span id="canRedo">-</span></span>
+    <!-- History Modal (Registry Editor Style) -->
+    <div id="historyModal" class="modal modal-registry">
+        <div class="registry-container">
+            <!-- Toolbar -->
+            <div class="registry-toolbar">
+                <div class="registry-title">Version History</div>
+                <div class="registry-toolbar-actions">
+                    <span id="registryVersionInfo" class="registry-info"></span>
+                    <button class="registry-close" onclick="closeHistoryModal()" aria-label="Close">&times;</button>
+                </div>
             </div>
 
-            <div id="historyList" class="history-list">
-                <!-- Dynamically generated version list -->
+            <!-- Address bar -->
+            <div class="registry-addressbar">
+                <div id="registryPath" class="registry-path"></div>
             </div>
 
-            <div class="modal-actions">
-                <button class="btn-secondary" onclick="closeHistoryModal()">Close</button>
+            <!-- Main body: tree + preview -->
+            <div class="registry-body">
+                <!-- Left pane: tree -->
+                <div class="registry-tree-pane" id="registryTreePane">
+                    <div id="historyTree" class="registry-tree">
+                        <!-- Dynamically generated tree -->
+                    </div>
+                </div>
+
+                <!-- Divider -->
+                <div class="registry-divider"></div>
+
+                <!-- Right pane: preview -->
+                <div class="registry-preview-pane" id="registryPreviewPane">
+                    <!-- Mode switcher (PC only) -->
+                    <div class="registry-preview-tabs" id="registryPreviewTabs">
+                        <button class="registry-tab active" data-mode="version" onclick="switchPreviewMode('version')">Version</button>
+                        <button class="registry-tab" data-mode="diff" onclick="switchPreviewMode('diff')">Diff</button>
+                    </div>
+                    <div id="registryPreview" class="registry-preview">
+                        <div class="registry-preview-empty">Select a version to preview</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mobile preview overlay (portrait) -->
+            <div class="registry-mobile-preview" id="registryMobilePreview">
+                <div class="registry-mobile-preview-header">
+                    <button class="registry-back-btn" onclick="closeMobilePreview()">&lt; Back</button>
+                    <span id="mobilePreviewTitle" class="registry-mobile-title"></span>
+                    <button class="btn-secondary registry-goto-btn" id="mobileGotoBtn" onclick="">Go to</button>
+                </div>
+                <div id="mobilePreviewContent" class="registry-preview"></div>
+            </div>
+
+            <!-- Status bar -->
+            <div class="registry-statusbar">
+                <span id="registryStatusLeft"></span>
+                <span id="registryStatusRight"></span>
             </div>
         </div>
     </div>

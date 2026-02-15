@@ -391,10 +391,31 @@ class VersionControl {
 // Data storage
 let words = [];
 let isFullMode = false;
+let hideMeaning = false;
 let editingIndex = -1;
 let selectedWords = new Set();
 let isSelectMode = false;
 let versionControl = null;
+let projectId = null;
+
+const PROJECT_ID_STORAGE_KEY = 'wordMemoryProjectId';
+
+function generateProjectId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function loadProjectId() {
+    projectId = localStorage.getItem(PROJECT_ID_STORAGE_KEY);
+    if (!projectId) {
+        projectId = generateProjectId();
+        localStorage.setItem(PROJECT_ID_STORAGE_KEY, projectId);
+    }
+    return projectId;
+}
+
+function getProjectId() {
+    return projectId || loadProjectId();
+}
 
 const SPEAKER_ICON_SVG = '<svg class="icon-speaker" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 10v4c0 1.1.9 2 2 2h2.35l3.38 2.7c.93.74 2.27.08 2.27-1.1V6.4c0-1.18-1.34-1.84-2.27-1.1L7.35 8H5c-1.1 0-2 .9-2 2Zm14.5 2c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03ZM15 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/></svg>';
 const DATE_INPUT_ICON_ONLY_THRESHOLD = 120;
@@ -840,14 +861,25 @@ function initResizableLayout() {
         syncLayoutDividerHandlePosition(divider, true);
     });
 
+    let isDividerHovered = false;
+
     const followPointerYInDivider = (event) => {
         if (!mediaQuery.matches || !desktopPointerQuery.matches || isResizing) return;
         if (event.pointerType && event.pointerType !== 'mouse') return;
         setLayoutDividerHandleFromClientY(divider, event.clientY);
     };
 
-    divider.addEventListener('pointerenter', followPointerYInDivider);
+    divider.addEventListener('pointerenter', (event) => {
+        isDividerHovered = true;
+        followPointerYInDivider(event);
+    });
     divider.addEventListener('pointermove', followPointerYInDivider);
+    divider.addEventListener('pointerleave', () => {
+        isDividerHovered = false;
+        if (!isResizing) {
+            divider.style.removeProperty('--layout-divider-handle-top');
+        }
+    });
 
     divider.addEventListener('dblclick', (event) => {
         event.preventDefault();
@@ -860,7 +892,9 @@ function initResizableLayout() {
 
     window.addEventListener('resize', applyLayout);
     window.addEventListener('scroll', () => {
-        syncLayoutDividerHandlePosition(divider, mediaQuery.matches);
+        if (isDividerHovered) {
+            syncLayoutDividerHandlePosition(divider, mediaQuery.matches);
+        }
     }, { passive: true });
     if (typeof mediaQuery.addEventListener === 'function') {
         mediaQuery.addEventListener('change', applyLayout);
@@ -873,6 +907,7 @@ function initResizableLayout() {
 
 // Initialize
 window.onload = function() {
+    loadProjectId();
     loadData();
 
     // Initialize version control
@@ -1177,9 +1212,11 @@ function toggleWordSelection(index) {
     } else {
         selectedWords.add(index);
     }
+    // Update checkbox visual
+    const cb = document.getElementById(`select-${index}`);
+    if (cb) cb.checked = selectedWords.has(index);
     updateBatchToolbar();
     updateWordSelectionUI();
-
 }
 
 // Toggle select mode
@@ -1680,27 +1717,27 @@ function renderWords() {
                 : '';
 
             html += `
-                <div class="word-item ${masteredClass} ${invalidClass}">
+                <div class="word-item ${masteredClass} ${invalidClass}${isSelectMode ? ' select-mode' : ''}" ${isSelectMode ? `onclick="toggleWordSelection(${originalIndex})"` : ''}>
                     <div class="word-header">
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            ${isSelectMode ? `<input type="checkbox" id="select-${originalIndex}" class="word-checkbox" onchange="toggleWordSelection(${originalIndex})" ${selectedWords.has(originalIndex) ? 'checked' : ''}>` : ''}
+                            ${isSelectMode ? `<input type="checkbox" id="select-${originalIndex}" class="word-checkbox" ${selectedWords.has(originalIndex) ? 'checked' : ''} tabindex="-1">` : ''}
                             <div>
                                 <span class="word-title">${w.word}</span>
                                 ${posTags}
-                                <button class="btn-pronounce" onclick="pronounceWord('${w.word}')" title="Pronounce (British)" aria-label="Pronounce (British)">${SPEAKER_ICON_SVG}</button>
+                                ${!isSelectMode ? `<button class="btn-pronounce" onclick="pronounceWord('${w.word}')" title="Pronounce (British)" aria-label="Pronounce (British)">${SPEAKER_ICON_SVG}</button>` : ''}
                             </div>
                         </div>
                         <div class="word-weight ${weightShapeClass}">${weightDisplay}</div>
                     </div>
                     <div class="word-meaning">${w.meaning}</div>
                     <div class="word-meta">Added: ${w.added}</div>
-                    <div class="word-actions">
+                    ${!isSelectMode ? `<div class="word-actions">
                         ${w.weight >= 0 ? `<button class="btn-remember" onclick="updateWeight(${originalIndex}, -1)">Down</button>` : ''}
                         ${w.weight >= -1 && w.weight < 10 ? `<button class="btn-forget" onclick="updateWeight(${originalIndex}, 1)">Up</button>` : ''}
                         ${isInvalid ? `<button class="btn-secondary" onclick="updateWeight(${originalIndex}, 3)">Fix</button>` : ''}
                         <button class="btn-edit" onclick="openEditModal(${originalIndex})">Edit</button>
                         <button class="btn-delete" onclick="deleteWord(${originalIndex})">Del</button>
-                    </div>
+                    </div>` : ''}
                 </div>
             `;
         });
@@ -1759,7 +1796,11 @@ function loadData() {
 // Export data
 // Export data only (without version history)
 function exportDataOnly() {
-    const dataStr = JSON.stringify(words, null, 2);
+    const exportObj = {
+        projectId: getProjectId(),
+        words: words
+    };
+    const dataStr = JSON.stringify(exportObj, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1778,6 +1819,7 @@ function exportWithVersionHistory() {
     }
 
     const exportData = {
+        projectId: getProjectId(),
         words: words,
         versionHistory: {
             format: 'tree-v1',
@@ -1919,6 +1961,26 @@ function importWordsOnly(wordsData) {
     }
 }
 
+// Import as a new branch on current version (overwrite for same project)
+function importAsBranch(wordsData) {
+    const { processed, validCount, invalidCount } = processImportedWords(wordsData);
+    words = processed;
+
+    // Create a new version branching from current
+    if (versionControl) {
+        versionControl.createVersion(words, `Imported branch (${processed.length} words)`);
+    }
+
+    localStorage.setItem('wordMemoryData', JSON.stringify(words));
+    renderWords();
+
+    if (invalidCount > 0) {
+        showStatus(`Overwrite: ${validCount} valid, ${invalidCount} invalid (branch created)`, 'success');
+    } else {
+        showStatus(`Overwrite: ${processed.length} words (branch created)`, 'success');
+    }
+}
+
 // Import data with version history
 function importWithVersionHistory(importedData) {
     const { processed, validCount, invalidCount } = processImportedWords(importedData.words);
@@ -1957,35 +2019,66 @@ function importData(event) {
         try {
             const imported = JSON.parse(e.target.result);
 
-            // Check if it contains version history
+            // Extract words data for any format
+            let importedWords = null;
+            let importedProjectId = null;
+            let hasVersionHistory = false;
+
             if (imported.versionHistory) {
+                importedWords = imported.words;
+                importedProjectId = imported.projectId || null;
+                hasVersionHistory = true;
+            } else if (Array.isArray(imported)) {
+                importedWords = imported;
+            } else if (imported.words && Array.isArray(imported.words)) {
+                importedWords = imported.words;
+                importedProjectId = imported.projectId || null;
+            } else {
+                showStatus('Invalid file format', 'error');
+                event.target.value = '';
+                return;
+            }
+
+            if (!importedWords) {
+                showStatus('No words data found', 'error');
+                event.target.value = '';
+                return;
+            }
+
+            // Same project ID: ask to overwrite (creates branch)
+            const currentProjectId = getProjectId();
+            if (importedProjectId && importedProjectId === currentProjectId) {
+                if (confirm(`Same project detected. Overwrite current data?\n(${importedWords.length} words will be imported as a new branch)`)) {
+                    importAsBranch(importedWords);
+                }
+                event.target.value = '';
+                return;
+            }
+
+            // Different project or no project ID
+            if (hasVersionHistory) {
                 const validation = validateVersionHistory(imported.versionHistory);
 
                 if (!validation.valid) {
-                    // Version history is corrupted, ask user
                     if (confirm(`Version history is corrupted: ${validation.error}\n\nContinue importing data only (version history will be cleared)?`)) {
-                        importWordsOnly(imported.words || imported);
+                        importWordsOnly(importedWords);
                     }
                     event.target.value = '';
                     return;
                 }
 
-                // Version history is valid, ask user to confirm full import
-                if (confirm(`Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`)) {
+                if (confirm(`Import ${importedWords.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`)) {
                     importWithVersionHistory(imported);
-                }
-            } else if (Array.isArray(imported)) {
-                // Old format - words array only
-                if (confirm(`Import ${imported.length} words? This will overwrite current data and clear version history.`)) {
-                    importWordsOnly(imported);
-                }
-            } else if (imported.words && Array.isArray(imported.words)) {
-                // Object with words array but no version history
-                if (confirm(`Import ${imported.words.length} words? This will overwrite current data and clear version history.`)) {
-                    importWordsOnly(imported.words);
+                    // Adopt the imported project ID
+                    if (importedProjectId) {
+                        projectId = importedProjectId;
+                        localStorage.setItem(PROJECT_ID_STORAGE_KEY, projectId);
+                    }
                 }
             } else {
-                showStatus('Invalid file format', 'error');
+                if (confirm(`Import ${importedWords.length} words? This will overwrite current data and clear version history.`)) {
+                    importWordsOnly(importedWords);
+                }
             }
         } catch (error) {
             showStatus('Failed to parse file', 'error');
@@ -2101,81 +2194,470 @@ function saveSettings() {
     closeSettingsModal();
 }
 
-// Version history functions
+// Version history functions — Registry Editor Style
+function formatVersionDate(date) {
+    if (!(date instanceof Date)) date = new Date(date);
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mi = String(date.getMinutes()).padStart(2, '0');
+    return `${mm}-${dd}-${hh}-${mi}`;
+}
+
+let _historySelectedId = null;
+let _historyExpandedSet = new Set();
+let _historyPreviewMode = 'version'; // 'version' or 'diff'
+
 function openHistoryModal() {
     if (!versionControl) return;
 
-    renderVersionHistory();
+    _historyExpandedSet.clear();
+    _historySelectedId = null;
+    const currentId = versionControl.currentId;
+    const rootId = versionControl.rootId;
+
+    if (rootId) {
+        // Always expand the root (initial version)
+        _historyExpandedSet.add(rootId);
+
+        const root = versionControl.versions.get(rootId);
+        if (root && root.children.length > 0) {
+            // Sort first-level children by timestamp
+            const sortedChildren = [...root.children].sort((a, b) => {
+                const vA = versionControl.versions.get(a);
+                const vB = versionControl.versions.get(b);
+                return new Date(vA.timestamp) - new Date(vB.timestamp);
+            });
+
+            // Last first-level directory: expand it and all its descendants
+            const lastChildId = sortedChildren[sortedChildren.length - 1];
+            const expandAllDescendants = (id) => {
+                _historyExpandedSet.add(id);
+                const v = versionControl.versions.get(id);
+                if (v && v.children.length > 0) {
+                    v.children.forEach(cid => expandAllDescendants(cid));
+                }
+            };
+            expandAllDescendants(lastChildId);
+
+            // Find the deepest last leaf of the last first-level directory
+            const findDeepestLastLeaf = (id) => {
+                const v = versionControl.versions.get(id);
+                if (!v || v.children.length === 0) return id;
+                const sorted = [...v.children].sort((a, b) => {
+                    const vA = versionControl.versions.get(a);
+                    const vB = versionControl.versions.get(b);
+                    return new Date(vA.timestamp) - new Date(vB.timestamp);
+                });
+                return findDeepestLastLeaf(sorted[sorted.length - 1]);
+            };
+            const deepestLastLeaf = findDeepestLastLeaf(lastChildId);
+
+            // If current version is not the deepest last leaf, also expand path to current
+            if (currentId && currentId !== deepestLastLeaf) {
+                let id = currentId;
+                while (id) {
+                    _historyExpandedSet.add(id);
+                    const v = versionControl.versions.get(id);
+                    id = v ? v.parentId : null;
+                }
+            }
+        }
+    }
+
+    if (currentId) {
+        _historySelectedId = currentId;
+    }
+
+    _historyPreviewMode = 'version';
     closeSettingsModal();
     document.getElementById('historyModal').classList.add('active');
+    renderRegistryTree();
+    renderRegistryPreview();
+    updateRegistryStatus();
+    updateRegistryAddressBar();
+    updatePreviewTabs();
 }
 
 function closeHistoryModal() {
+    // If a version is selected and it's not the current version, ask to apply
+    if (_historySelectedId && _historySelectedId !== versionControl.currentId) {
+        const version = versionControl.versions.get(_historySelectedId);
+        if (version) {
+            const desc = version.description || formatVersionDate(version.timestamp);
+            if (confirm(`Apply selected version?\n"${desc}"`)) {
+                goToVersionById(_historySelectedId);
+            }
+        }
+    }
     document.getElementById('historyModal').classList.remove('active');
+    closeMobilePreview();
 }
 
-function renderVersionHistory() {
+function updateRegistryAddressBar() {
+    const pathEl = document.getElementById('registryPath');
+
+    // Build ancestor chain from root to selected
+    const chain = [];
+    if (_historySelectedId) {
+        let id = _historySelectedId;
+        while (id) {
+            const ver = versionControl.versions.get(id);
+            if (!ver) break;
+            chain.unshift({ id: id, label: formatVersionDate(ver.timestamp) });
+            id = ver.parentId;
+        }
+    }
+
+    // Render clickable breadcrumbs
+    let html = '<span class="registry-path-seg registry-path-root" onclick="navToRoot()">History</span>';
+    chain.forEach((seg, i) => {
+        html += '<span class="registry-path-sep">\\</span>';
+        const isLast = i === chain.length - 1;
+        html += `<span class="registry-path-seg${isLast ? ' registry-path-active' : ''}" onclick="selectVersionNode('${seg.id}')">${seg.label}</span>`;
+    });
+    pathEl.innerHTML = html;
+}
+
+function navToRoot() {
+    // Select root and collapse all
+    if (!versionControl || !versionControl.rootId) return;
+    _historySelectedId = versionControl.rootId;
+    _historyExpandedSet.clear();
+    _historyExpandedSet.add(versionControl.rootId);
+    renderRegistryTree();
+    renderRegistryPreview();
+    updateRegistryAddressBar();
+}
+
+function updateRegistryStatus() {
+    const left = document.getElementById('registryStatusLeft');
+    const right = document.getElementById('registryStatusRight');
+    const total = versionControl.versions.size;
+    const canU = versionControl.canUndo();
+    const canR = versionControl.canRedo();
+    left.textContent = `${total} version(s)`;
+    right.textContent = `Undo: ${canU ? 'Yes' : 'No'} | Redo: ${canR ? 'Yes' : 'No'}`;
+
+    const info = document.getElementById('registryVersionInfo');
+    info.textContent = `${total} ver.`;
+}
+
+function updatePreviewTabs() {
+    const tabs = document.getElementById('registryPreviewTabs');
+    // Show tabs only on PC (handled by CSS mostly, but set active state)
+    tabs.querySelectorAll('.registry-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.mode === _historyPreviewMode);
+    });
+}
+
+function switchPreviewMode(mode) {
+    _historyPreviewMode = mode;
+    updatePreviewTabs();
+    renderRegistryPreview();
+}
+
+// ---- Tree Rendering ----
+
+function renderRegistryTree() {
     if (!versionControl) return;
+    const container = document.getElementById('historyTree');
+    if (!versionControl.rootId) {
+        container.innerHTML = '<div class="registry-preview-empty">No Version History</div>';
+        return;
+    }
+    container.innerHTML = buildTreeNodeHTML(versionControl.rootId, 0, []);
+}
 
-    const tree = versionControl.getVersionTree();
-    const container = document.getElementById('historyList');
+function buildTreeNodeHTML(versionId, depth, parentLines) {
+    const version = versionControl.versions.get(versionId);
+    if (!version) return '';
 
-    // Update version info with tree structure
-    const currentVersion = versionControl.getCurrentVersion();
-    const totalVersions = versionControl.versions.size;
-    document.getElementById('currentVersionIndex').textContent = currentVersion ? '✓' : '-';
-    document.getElementById('totalVersions').textContent = totalVersions;
-    document.getElementById('canUndo').textContent = versionControl.canUndo() ? 'Yes' : 'No';
-    document.getElementById('canRedo').textContent = versionControl.canRedo() ? 'Yes' : 'No';
+    const isCurrent = versionId === versionControl.currentId;
+    const isSelected = versionId === _historySelectedId;
+    const childCount = version.children.length;
+    const isFork = childCount > 1;
+    const isLinear = childCount === 1;
+    const isExpanded = _historyExpandedSet.has(versionId);
 
-    if (tree.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">—</div><div>No Version History</div></div>';
+    // Shorten description
+    let desc = version.description || '';
+    if (desc.length > 30) desc = desc.substring(0, 28) + '…';
+
+    // Build indent guides
+    let indentHTML = '';
+    for (let i = 0; i < depth; i++) {
+        const hasLine = parentLines[i];
+        indentHTML += `<span class="tree-indent${hasLine ? ' has-line' : ''}"></span>`;
+    }
+
+    // Toggle icon: only show for fork nodes (2+ children)
+    const toggleClass = isFork
+        ? (isExpanded ? 'tree-toggle has-children expanded' : 'tree-toggle has-children')
+        : 'tree-toggle no-children';
+
+    // Row classes
+    let rowClass = 'tree-node-row';
+    if (isCurrent) rowClass += ' current-version';
+    if (isSelected) rowClass += ' selected';
+
+    let html = `<div class="tree-node">`;
+    html += `<div class="${rowClass}" data-id="${versionId}" onclick="selectVersionNode('${versionId}')" ondblclick="goToVersionById('${versionId}')">`;
+    html += indentHTML;
+    html += `<span class="${toggleClass}" onclick="event.stopPropagation(); toggleTreeNode('${versionId}')"></span>`;
+    html += `<span class="tree-label">`;
+    html += `<span class="tree-label-desc">${escapeHtml(desc)}</span>`;
+    if (isCurrent) html += `<span class="tree-label-current">current</span>`;
+    html += `</span>`;
+    html += `</div>`;
+
+    if (isLinear) {
+        // Linear chain: render child at the same depth, flat list style
+        html += buildTreeNodeHTML(version.children[0], depth, parentLines);
+    } else if (isFork) {
+        // Fork: render branches with tree indentation
+        html += `<div class="tree-children${isExpanded ? ' expanded' : ''}">`;
+        const sortedChildren = [...version.children].sort((a, b) => {
+            const vA = versionControl.versions.get(a);
+            const vB = versionControl.versions.get(b);
+            return new Date(vA.timestamp) - new Date(vB.timestamp);
+        });
+        sortedChildren.forEach((childId, idx) => {
+            const isLast = idx === sortedChildren.length - 1;
+            const newParentLines = [...parentLines, !isLast];
+            html += buildTreeNodeHTML(childId, depth + 1, newParentLines);
+        });
+        html += `</div>`;
+    }
+
+    html += `</div>`;
+    return html;
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function toggleTreeNode(versionId) {
+    if (_historyExpandedSet.has(versionId)) {
+        _historyExpandedSet.delete(versionId);
+    } else {
+        _historyExpandedSet.add(versionId);
+    }
+    renderRegistryTree();
+}
+
+function selectVersionNode(versionId) {
+    _historySelectedId = versionId;
+
+    // Ensure all ancestors are expanded so the node is visible
+    let id = versionId;
+    while (id) {
+        _historyExpandedSet.add(id);
+        const v = versionControl.versions.get(id);
+        id = v ? v.parentId : null;
+    }
+
+    renderRegistryTree();
+    renderRegistryPreview();
+    updateRegistryAddressBar();
+
+    // On portrait mobile, open mobile preview
+    if (isPortraitMobile()) {
+        openMobilePreview(versionId);
+    }
+}
+
+function isPortraitMobile() {
+    return window.innerWidth < 768 && window.innerHeight > window.innerWidth;
+}
+
+// ---- Mobile Preview (portrait) ----
+
+function openMobilePreview(versionId) {
+    const overlay = document.getElementById('registryMobilePreview');
+    const content = document.getElementById('mobilePreviewContent');
+    const title = document.getElementById('mobilePreviewTitle');
+    const gotoBtn = document.getElementById('mobileGotoBtn');
+
+    const version = versionControl.versions.get(versionId);
+    if (!version) return;
+
+    title.textContent = version.description || formatVersionDate(version.timestamp);
+    gotoBtn.setAttribute('onclick', `goToVersionById('${versionId}'); closeMobilePreview();`);
+
+    content.innerHTML = renderJsonHighlight(version.data);
+    overlay.classList.add('active');
+}
+
+function closeMobilePreview() {
+    document.getElementById('registryMobilePreview').classList.remove('active');
+}
+
+// ---- JSON Preview Rendering ----
+
+function renderRegistryPreview() {
+    const container = document.getElementById('registryPreview');
+
+    if (!_historySelectedId) {
+        container.innerHTML = '<div class="registry-preview-empty">Select a version to preview</div>';
         return;
     }
 
+    const version = versionControl.versions.get(_historySelectedId);
+    if (!version) {
+        container.innerHTML = '<div class="registry-preview-empty">Version not found</div>';
+        return;
+    }
+
+    if (_historyPreviewMode === 'diff') {
+        const currentVersion = versionControl.getCurrentVersion();
+        if (!currentVersion || currentVersion.id === _historySelectedId) {
+            container.innerHTML = '<div class="registry-preview-empty">Select a different version to compare with current</div>';
+            return;
+        }
+        container.innerHTML = renderDiffView(version.data, currentVersion.data, version, currentVersion);
+    } else {
+        container.innerHTML = renderJsonHighlight(version.data);
+    }
+}
+
+function renderJsonHighlight(data) {
+    const jsonStr = JSON.stringify(data, null, 2);
+    const lines = jsonStr.split('\n');
     let html = '';
-    tree.forEach(version => {
-        const isCurrent = version.isCurrent;
-        const hasMultipleBranches = version.children.length > 1;
+    lines.forEach((line, i) => {
+        const lineNum = i + 1;
+        const highlighted = highlightJsonLine(line);
+        html += `<span class="json-line"><span class="json-line-number">${lineNum}</span>${highlighted}</span>`;
+    });
+    return html;
+}
 
-        // Create tree prefix with indentation
-        const indent = '  '.repeat(version.depth); // 2 spaces per depth level
-        let branchIcon = '';
+function highlightJsonLine(line) {
+    // Replace special HTML chars first
+    line = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-        if (version.depth > 0) {
-            if (hasMultipleBranches) {
-                branchIcon = '┬'; // Has multiple branches
-            } else if (version.hasChildren) {
-                branchIcon = '├'; // Has single child
+    // Tokenize and highlight
+    let result = '';
+    let i = 0;
+    while (i < line.length) {
+        // Whitespace
+        if (line[i] === ' ' || line[i] === '\t') {
+            result += line[i]; i++; continue;
+        }
+        // Quoted string
+        if (line[i] === '"') {
+            let j = i + 1;
+            while (j < line.length && line[j] !== '"') {
+                if (line[j] === '\\') j++; // skip escaped char
+                j++;
+            }
+            j++; // include closing quote
+            const str = line.substring(i, j);
+            // Check if this is a key (followed by :)
+            let k = j;
+            while (k < line.length && line[k] === ' ') k++;
+            if (line[k] === ':') {
+                result += `<span class="json-key">${str}</span>`;
             } else {
-                branchIcon = '└'; // Leaf node
+                result += `<span class="json-string">${str}</span>`;
+            }
+            i = j; continue;
+        }
+        // Number
+        if (line[i] === '-' || (line[i] >= '0' && line[i] <= '9')) {
+            let j = i;
+            if (line[j] === '-') j++;
+            while (j < line.length && ((line[j] >= '0' && line[j] <= '9') || line[j] === '.')) j++;
+            if (j > i && (j === i + 1 ? line[i] !== '-' : true)) {
+                result += `<span class="json-number">${line.substring(i, j)}</span>`;
+                i = j; continue;
             }
         }
+        // Boolean / null
+        const remaining = line.substring(i);
+        const kwMatch = remaining.match(/^(true|false|null)\b/);
+        if (kwMatch) {
+            result += `<span class="json-boolean">${kwMatch[1]}</span>`;
+            i += kwMatch[1].length; continue;
+        }
+        // Brackets
+        if ('{[]}'.includes(line[i]) || line[i] === '}') {
+            result += `<span class="json-bracket">${line[i]}</span>`;
+            i++; continue;
+        }
+        // Other chars (colon, comma, etc.)
+        result += line[i]; i++;
+    }
+    return result;
+}
 
-        const prefix = version.depth > 0 ? indent + branchIcon + ' ' : '';
+// ---- Diff View ----
 
-        const date = new Date(version.timestamp);
-        const dateStr = date.toLocaleString('en-GB', {
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+function renderDiffView(dataA, dataB, versionA, versionB) {
+    const jsonA = JSON.stringify(dataA, null, 2).split('\n');
+    const jsonB = JSON.stringify(dataB, null, 2).split('\n');
 
-        html += `
-            <div class="version-item ${isCurrent ? 'current' : ''} depth-${version.depth}" onclick="goToVersionById('${version.id}')">
-                <div class="version-header">
-                    <span class="version-tree-prefix">${prefix}</span>
-                    <span class="version-date">${dateStr}</span>
-                    ${hasMultipleBranches ? '<span class="branch-indicator">⑂</span>' : ''}
-                </div>
-                <div class="version-description">${version.description}</div>
-                <div class="version-meta">${version.wordCount} word(s)${isCurrent ? ' • Current' : ''}</div>
-            </div>
-        `;
+    const diff = computeLineDiff(jsonA, jsonB);
+
+    const dateA = formatVersionDate(versionA.timestamp);
+    const dateB = formatVersionDate(versionB.timestamp);
+
+    let html = `<div class="diff-header">Selected: ${dateA} vs Current: ${dateB}</div>`;
+
+    let lineNum = 0;
+    diff.forEach(entry => {
+        if (entry.type === 'equal') {
+            lineNum++;
+            html += `<span class="json-line"><span class="json-line-number">${lineNum}</span>${highlightJsonLine(entry.line)}</span>`;
+        } else if (entry.type === 'removed') {
+            html += `<span class="json-line diff-removed"><span class="json-line-number">-</span>${highlightJsonLine(entry.line)}</span>`;
+        } else if (entry.type === 'added') {
+            lineNum++;
+            html += `<span class="json-line diff-added"><span class="json-line-number">+</span>${highlightJsonLine(entry.line)}</span>`;
+        }
     });
 
-    container.innerHTML = html;
+    return html;
+}
+
+// Simple LCS-based line diff
+function computeLineDiff(linesA, linesB) {
+    const m = linesA.length;
+    const n = linesB.length;
+
+    // Build LCS table
+    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (linesA[i - 1] === linesB[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+            }
+        }
+    }
+
+    // Backtrack
+    const result = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && linesA[i - 1] === linesB[j - 1]) {
+            result.unshift({ type: 'equal', line: linesA[i - 1] });
+            i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+            result.unshift({ type: 'added', line: linesB[j - 1] });
+            j--;
+        } else {
+            result.unshift({ type: 'removed', line: linesA[i - 1] });
+            i--;
+        }
+    }
+
+    return result;
 }
 
 function goToVersionById(versionId) {
@@ -2183,10 +2665,13 @@ function goToVersionById(versionId) {
 
     const version = versionControl.goToVersion(versionId);
     if (version) {
-        words = JSON.parse(JSON.stringify(version.data)); // Deep copy
+        words = JSON.parse(JSON.stringify(version.data));
         localStorage.setItem('wordMemoryData', JSON.stringify(words));
         renderWords();
-        renderVersionHistory(); // Update the history display
+        renderRegistryTree();
+        renderRegistryPreview();
+        updateRegistryStatus();
+        updateRegistryAddressBar();
         showStatus(`Jumped to version: ${version.description}`, 'success');
     }
 }
@@ -2203,3 +2688,53 @@ document.getElementById('historyModal').addEventListener('click', function(e) {
         closeHistoryModal();
     }
 });
+
+// Registry divider drag-to-resize
+(function() {
+    const divider = document.querySelector('.registry-divider');
+    const treePane = document.getElementById('registryTreePane');
+    const body = document.querySelector('.registry-body');
+    if (!divider || !treePane || !body) return;
+
+    let isDragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    divider.addEventListener('pointerdown', function(e) {
+        isDragging = true;
+        startX = e.clientX;
+        startWidth = treePane.getBoundingClientRect().width;
+        divider.classList.add('is-dragging');
+        divider.setPointerCapture(e.pointerId);
+        e.preventDefault();
+    });
+
+    divider.addEventListener('pointermove', function(e) {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const bodyWidth = body.getBoundingClientRect().width;
+        let newWidth = startWidth + dx;
+        // Clamp between 120px and 60% of body
+        newWidth = Math.max(120, Math.min(newWidth, bodyWidth * 0.6));
+        treePane.style.width = newWidth + 'px';
+        treePane.style.maxWidth = 'none';
+    });
+
+    divider.addEventListener('pointerup', function(e) {
+        if (!isDragging) return;
+        isDragging = false;
+        divider.classList.remove('is-dragging');
+        divider.releasePointerCapture(e.pointerId);
+    });
+
+    divider.addEventListener('lostpointercapture', function() {
+        isDragging = false;
+        divider.classList.remove('is-dragging');
+    });
+
+    // Double-click to reset
+    divider.addEventListener('dblclick', function() {
+        treePane.style.width = '';
+        treePane.style.maxWidth = '';
+    });
+})();

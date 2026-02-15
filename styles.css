@@ -40,9 +40,8 @@ html {
 }
 
 body {
-	font-family: 'Sarasa UI CL', 'Sarasa UI SC', 'PingFang TC', 'Noto Sans CJK TC',
-		'Noto Sans TC', 'Microsoft JhengHei', 'Heiti TC', 'Source Han Sans TC',
-		-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', 'Arial', sans-serif;
+	font-family: 'Sarasa UI CL', 'Sarasa UI SC', 'Sarasa UI TC', 'Sarasa UI HC',
+		'Sarasa UI J', 'Sarasa UI K', 'Sarasa Gothic CL', sans-serif;
 	background: var(--color-bg);
 	color: var(--color-text);
 	line-height: 1.6;
@@ -165,7 +164,7 @@ h1 img {
 .status-indicator {
 	text-align: center;
 	font-size: 10px;
-	font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+	font-family: 'Maple Mono NF CN', 'Maple Mono NF', 'Maple Mono', monospace;
 	color: var(--color-text-light);
 	margin-top: 0;
 	margin-bottom: calc(var(--space-lg) / 4);
@@ -646,7 +645,7 @@ button:disabled {
 	min-width: 4.5ch;
 	padding: 4px 6px;
 	font-size: 12px;
-	font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+	font-family: 'Maple Mono NF CN', 'Maple Mono NF', 'Maple Mono', monospace;
 	border: 1px solid var(--color-border);
 	background: var(--color-bg);
 	color: var(--color-text);
@@ -855,7 +854,7 @@ button:disabled {
 	min-width: 80px;
 	padding: 6px var(--space-sm);
 	font-size: 12px;
-	font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+	font-family: 'Maple Mono NF CN', 'Maple Mono NF', 'Maple Mono', monospace;
 	border: 1px solid var(--color-border);
 	background: var(--color-bg);
 	color: var(--color-text);
@@ -952,6 +951,15 @@ button:disabled {
 	}
 }
 
+.word-item.select-mode {
+	cursor: pointer;
+	user-select: none;
+}
+
+.word-item.select-mode .word-checkbox {
+	pointer-events: none;
+}
+
 .word-checkbox {
 	cursor: pointer;
 	outline: none;
@@ -985,6 +993,7 @@ button:disabled {
 	text-transform: uppercase;
 	margin-left: 4px;
 	user-select: none;
+	-webkit-user-select: none;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1295,136 +1304,576 @@ button:disabled {
 }
 
 /* ========================================
-   Version History
+   Version History — Registry Editor Style
    ======================================== */
 
-.version-info {
+/* Full-screen modal override */
+.modal.modal-registry {
+	padding: 0;
+}
+
+.registry-container {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	background: var(--color-surface);
+	overflow: hidden;
+}
+
+/* Toolbar */
+.registry-toolbar {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	padding: var(--space-md);
+	padding: 6px var(--space-md);
 	background: var(--color-bg);
-	border: 1px solid var(--color-border);
-	margin-bottom: var(--space-md);
-	font-size: 10px;
+	border-bottom: 1px solid var(--color-border);
+	flex-shrink: 0;
+}
+
+.registry-title {
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+}
+
+.registry-toolbar-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+}
+
+.registry-info {
+	font-size: 9px;
 	font-weight: 600;
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
 	color: var(--color-text-light);
 }
 
-.version-info span {
-	display: inline-block;
-}
-
-.history-list {
-	max-height: 400px;
-	overflow-y: auto;
-	border: 1px solid var(--color-border);
-}
-
-.version-item {
-	padding: var(--space-md);
-	border-bottom: 1px solid var(--color-line);
+.registry-close {
+	background: none;
+	border: none;
+	font-size: 18px;
 	cursor: pointer;
-	background: var(--color-surface);
-	transition: background 0.2s;
+	color: var(--color-text);
+	padding: 0;
+	width: 28px;
+	height: 28px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	line-height: 1;
+	border-radius: var(--radius);
+	margin-top: 0;
 }
 
-.version-item:last-child {
-	border-bottom: none;
-}
-
-.version-item:hover {
+.registry-close:hover {
 	background: var(--color-bg);
 }
 
-.version-item.current {
+/* Address bar */
+.registry-addressbar {
+	display: flex;
+	align-items: center;
+	padding: 4px var(--space-md);
+	background: var(--color-surface);
+	border-bottom: 1px solid var(--color-border);
+	font-size: 11px;
+	font-family: 'Maple Mono NF CN', 'Maple Mono NF', 'Maple Mono', monospace;
+	flex-shrink: 0;
+	gap: var(--space-sm);
+	color: var(--color-text-light);
+	overflow: hidden;
+}
+
+.registry-path {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	white-space: nowrap;
+	overflow-x: auto;
+	overflow-y: hidden;
+	flex: 1;
+	scrollbar-width: none;
+}
+
+.registry-path::-webkit-scrollbar {
+	display: none;
+}
+
+.registry-path-seg {
+	cursor: pointer;
+	padding: 2px 6px;
+	border-radius: var(--radius);
+	transition: background 0.15s, color 0.15s;
+	flex-shrink: 0;
+}
+
+.registry-path-seg:hover {
+	background: var(--color-bg);
+	color: var(--color-text);
+}
+
+.registry-path-active {
+	color: var(--color-text);
+	font-weight: 600;
+}
+
+.registry-path-sep {
+	color: var(--color-text-light);
+	opacity: 0.4;
+	flex-shrink: 0;
+	font-size: 10px;
+}
+
+/* Body: tree + preview split */
+.registry-body {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+}
+
+/* Tree pane (left) */
+.registry-tree-pane {
+	width: 30%;
+	min-width: 180px;
+	max-width: 400px;
+	border-right: 1px solid var(--color-border);
+	overflow-y: auto;
+	overflow-x: hidden;
+	background: var(--color-surface);
+	flex-shrink: 0;
+}
+
+.registry-tree {
+	padding: var(--space-xs) 0;
+}
+
+/* Tree node */
+.tree-node {
+	user-select: none;
+}
+
+.tree-node-row {
+	display: flex;
+	align-items: center;
+	padding: 3px var(--space-sm);
+	padding-right: var(--space-md);
+	cursor: pointer;
+	font-size: 12px;
+	line-height: 1.4;
+	white-space: nowrap;
+	transition: background 0.1s;
+	border-left: 2px solid transparent;
+}
+
+.tree-node-row:hover {
+	background: var(--color-bg);
+}
+
+.tree-node-row.selected {
+	background: var(--color-bg);
+	border-left-color: var(--color-accent);
+}
+
+.tree-node-row.current-version {
 	background: var(--color-text);
 	color: var(--color-surface);
 }
 
-.version-item.current:hover {
+.tree-node-row.current-version:hover {
 	background: var(--color-accent);
 }
 
-.version-header {
-	display: flex;
-	justify-content: space-between;
+.tree-node-row.current-version.selected {
+	background: var(--color-accent);
+	border-left-color: var(--color-surface);
+}
+
+/* Indent guides */
+.tree-indent {
+	display: inline-flex;
+	width: 16px;
+	flex-shrink: 0;
+	position: relative;
+}
+
+.tree-indent.has-line::before {
+	content: '';
+	position: absolute;
+	left: 7px;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	background: var(--color-border);
+}
+
+/* Expand/collapse toggle */
+.tree-toggle {
+	display: inline-flex;
 	align-items: center;
-	margin-bottom: var(--space-xs);
-}
-
-.version-number {
-	font-size: 11px;
-	font-weight: 600;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-}
-
-.version-date {
-	font-size: 9px;
-	font-weight: 600;
-	letter-spacing: 0.08em;
-	opacity: 0.6;
-	font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
-}
-
-.version-description {
-	font-size: 12px;
-	margin-bottom: var(--space-xs);
-	line-height: 1.4;
-}
-
-.version-meta {
-	font-size: 9px;
-	opacity: 0.6;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-}
-
-/* Tree-specific styles */
-.version-tree-prefix {
-	font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
-	font-size: 10px;
-	margin-right: 8px;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	flex-shrink: 0;
+	font-size: 8px;
 	color: var(--color-text-light);
-	white-space: pre;
-	display: inline-block;
+	cursor: pointer;
 }
 
-.branch-indicator {
+.tree-toggle.has-children::before {
+	content: '▶';
+	display: inline-block;
+	transition: transform 0.15s;
+}
+
+.tree-toggle.expanded::before {
+	transform: rotate(90deg);
+}
+
+.tree-toggle.no-children {
+	visibility: hidden;
+}
+
+/* Folder icon */
+.tree-icon {
+	flex-shrink: 0;
+	margin-right: 4px;
+	font-size: 13px;
+	line-height: 1;
+}
+
+/* Node label */
+.tree-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.tree-label-date {
+	font-family: 'Maple Mono NF CN', 'Maple Mono NF', 'Maple Mono', monospace;
+	font-size: 10px;
+	opacity: 0.7;
+	flex-shrink: 0;
+}
+
+.tree-label-desc {
+	overflow: hidden;
+	text-overflow: ellipsis;
 	font-size: 11px;
-	margin-left: 8px;
-	opacity: 0.8;
-	display: inline-block;
 }
 
-/* Depth-based indentation (handled by tree-prefix, but keep for potential future use) */
-.version-item.depth-0 {
-	/* Root level - no extra indentation */
+.tree-label-current {
+	font-size: 8px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	opacity: 0.6;
+	flex-shrink: 0;
 }
 
-.version-item.depth-1 {
-	/* First level children */
-}
-
-.version-item.depth-2 {
-	/* Second level children */
-}
-
-.version-item.depth-3 {
-	/* Third level children */
-}
-
-/* Ensure current version stands out in tree view */
-.version-item.current .version-tree-prefix {
+.tree-node-row.current-version .tree-label-date,
+.tree-node-row.current-version .tree-toggle {
 	color: var(--color-surface);
 	opacity: 0.8;
 }
 
-.version-item.current .branch-indicator {
-	opacity: 1;
+.tree-node-row.current-version .tree-indent.has-line::before {
+	background: rgba(255,255,255,0.3);
+}
+
+/* Children container */
+.tree-children {
+	display: none;
+}
+
+.tree-children.expanded {
+	display: block;
+}
+
+/* Divider */
+.registry-divider {
+	width: 5px;
+	background: var(--color-border);
+	flex-shrink: 0;
+	cursor: col-resize;
+	position: relative;
+	transition: background 0.15s;
+}
+
+.registry-divider::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -4px;
+	right: -4px;
+	z-index: 1;
+}
+
+.registry-divider:hover,
+.registry-divider.is-dragging {
+	background: var(--color-accent);
+}
+
+/* Preview pane (right) */
+.registry-preview-pane {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	background: var(--color-bg);
+}
+
+/* Preview tabs (PC only) */
+.registry-preview-tabs {
+	display: flex;
+	gap: 0;
+	border-bottom: 1px solid var(--color-border);
+	background: var(--color-surface);
+	flex-shrink: 0;
+}
+
+.registry-tab {
+	padding: 6px var(--space-md);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	background: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	cursor: pointer;
+	color: var(--color-text-light);
+	transition: color 0.15s, border-color 0.15s;
+}
+
+.registry-tab:hover {
+	color: var(--color-text);
+}
+
+.registry-tab.active {
+	color: var(--color-text);
+	border-bottom-color: var(--color-accent);
+}
+
+/* Preview content */
+.registry-preview {
+	flex: 1;
+	overflow: auto;
+	padding: var(--space-md);
+	font-family: 'Maple Mono NF CN', 'Maple Mono NF', 'Maple Mono', monospace;
+	font-size: 12px;
+	line-height: 1.6;
+	white-space: pre;
+	tab-size: 2;
+}
+
+.registry-preview-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	color: var(--color-text-light);
+	font-family: inherit;
+	font-size: 11px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	white-space: normal;
+}
+
+/* JSON syntax highlighting */
+.json-key {
+	color: var(--color-text);
+	font-weight: 600;
+}
+
+.json-string {
+	color: var(--color-accent);
+}
+
+.json-number {
+	color: #6B8E7B;
+}
+
+.json-boolean,
+.json-null {
+	color: #B85450;
+}
+
+.json-bracket {
+	color: var(--color-text-light);
+}
+
+.json-line {
+	display: block;
+}
+
+.json-line-number {
+	display: inline-block;
+	width: 32px;
+	text-align: right;
+	margin-right: 12px;
+	color: var(--color-text-light);
+	opacity: 0.4;
+	font-size: 10px;
+	user-select: none;
+}
+
+/* Diff highlighting */
+.diff-added {
+	background: rgba(107, 142, 123, 0.15);
+}
+
+.diff-removed {
+	background: rgba(184, 84, 80, 0.15);
+	text-decoration: line-through;
+	opacity: 0.7;
+}
+
+.diff-header {
+	color: var(--color-text-light);
+	font-size: 10px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	padding: var(--space-sm) 0;
+	margin-bottom: var(--space-sm);
+	border-bottom: 1px solid var(--color-border);
+	white-space: normal;
+}
+
+/* Status bar */
+.registry-statusbar {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 4px var(--space-md);
+	background: var(--color-bg);
+	border-top: 1px solid var(--color-border);
+	font-size: 9px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--color-text-light);
+	flex-shrink: 0;
+}
+
+/* Mobile preview overlay (portrait) */
+.registry-mobile-preview {
+	display: none;
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: var(--color-surface);
+	flex-direction: column;
+	z-index: 10;
+}
+
+.registry-mobile-preview.active {
+	display: flex;
+}
+
+.registry-mobile-preview-header {
+	display: flex;
+	align-items: center;
+	padding: var(--space-sm) var(--space-md);
+	border-bottom: 1px solid var(--color-border);
+	gap: var(--space-sm);
+	flex-shrink: 0;
+}
+
+.registry-back-btn {
+	background: none;
+	border: none;
+	font-size: 14px;
+	cursor: pointer;
+	color: var(--color-accent);
+	padding: 4px 8px;
+	font-weight: 600;
+}
+
+.registry-mobile-title {
+	flex: 1;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.registry-goto-btn {
+	flex-shrink: 0;
+	font-size: 10px;
+	padding: 4px 10px;
+}
+
+/* ---- Responsive: Portrait mobile ---- */
+@media (max-width: 767px) and (orientation: portrait),
+       (max-width: 480px) {
+	.registry-container {
+		position: relative;
+	}
+
+	.registry-tree-pane {
+		width: 100%;
+		max-width: none;
+		border-right: none;
+	}
+
+	.registry-divider,
+	.registry-preview-pane {
+		display: none;
+	}
+}
+
+/* ---- Responsive: Landscape mobile ---- */
+@media (max-width: 1023px) and (orientation: landscape) and (hover: none) and (pointer: coarse) {
+	.registry-tree-pane {
+		width: 35%;
+		max-width: 280px;
+	}
+
+	.registry-preview-tabs {
+		display: none;
+	}
+}
+
+/* ---- Responsive: PC / large screens ---- */
+@media (min-width: 1024px), (hover: hover) and (pointer: fine) {
+	.registry-tree-pane {
+		width: 30%;
+	}
+}
+
+/* Dark mode overrides for JSON highlighting */
+@media (prefers-color-scheme: dark) {
+	.json-number {
+		color: #7CAE8B;
+	}
+
+	.json-boolean,
+	.json-null {
+		color: #D88482;
+	}
+
+	.diff-added {
+		background: rgba(124, 174, 139, 0.12);
+	}
+
+	.diff-removed {
+		background: rgba(216, 132, 130, 0.12);
+	}
 }
 
 /* ========================================
