@@ -23,11 +23,11 @@
             <div class="workspace-left">
                 <!-- Mode Switch -->
                 <div class="mode-switch">
-                    <label>Daily</label>
+                    <label>Show</label>
                     <div class="toggle" id="modeToggle" tabindex="0">
                         <div class="toggle-slider"></div>
                     </div>
-                    <label>Full</label>
+                    <label>Hide Meaning</label>
                 </div>
 
                 <!-- Status Indicator -->
@@ -93,6 +93,7 @@
                     <button class="btn-secondary" onclick="exportData()">Export</button>
                     <button class="btn-secondary" onclick="document.getElementById('importFile').click()">Import</button>
                     <button class="btn-secondary" id="selectModeBtn" onclick="toggleSelectMode()">Select Words</button>
+                    <button class="btn-secondary" id="sortModeBtn" onclick="toggleSortMode()">A-Z</button>
                     <button class="btn-secondary" onclick="openSettingsModal()">Settings</button>
                     <input type="file" id="importFile" accept=".json" onchange="importData(event)">
                 </div>
@@ -267,6 +268,8 @@
                 <div class="registry-title">Version History</div>
                 <div class="registry-toolbar-actions">
                     <span id="registryVersionInfo" class="registry-info"></span>
+                    <button class="registry-toolbar-btn" id="registryDeleteBtn" onclick="deleteSelectedVersions()" disabled title="Delete selected">Del</button>
+                    <button class="registry-toolbar-btn" id="registryRenameBtn" onclick="renameSelectedVersion()" disabled title="Rename selected">Ren</button>
                     <button class="registry-close" onclick="closeHistoryModal()" aria-label="Close">&times;</button>
                 </div>
             </div>

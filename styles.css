@@ -1353,6 +1353,35 @@ button:disabled {
 	color: var(--color-text-light);
 }
 
+.registry-toolbar-btn {
+	background: none;
+	border: 1px solid var(--color-border);
+	font-size: 9px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	cursor: pointer;
+	color: var(--color-text-light);
+	padding: 2px 8px;
+	line-height: 1;
+	width: auto;
+	height: 24px;
+	margin-top: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.registry-toolbar-btn:hover:not(:disabled) {
+	background: var(--color-bg);
+	color: var(--color-text);
+}
+
+.registry-toolbar-btn:disabled {
+	opacity: 0.3;
+	cursor: not-allowed;
+}
+
 .registry-close {
 	background: none;
 	border: none;
@@ -1476,7 +1505,7 @@ button:disabled {
 }
 
 .tree-node-row.selected {
-	background: var(--color-bg);
+	background: color-mix(in srgb, var(--color-accent) 15%, var(--color-surface));
 	border-left-color: var(--color-accent);
 }
 
@@ -1510,6 +1539,15 @@ button:disabled {
 	bottom: 0;
 	width: 1px;
 	background: var(--color-border);
+}
+
+/* Tree checkbox */
+.tree-checkbox {
+	width: 12px;
+	height: 12px;
+	margin: 0 2px 0 0;
+	flex-shrink: 0;
+	cursor: pointer;
 }
 
 /* Expand/collapse toggle */
@@ -1825,10 +1863,16 @@ button:disabled {
 		position: relative;
 	}
 
+	.registry-body {
+		flex-direction: column;
+	}
+
 	.registry-tree-pane {
 		width: 100%;
+		min-width: 0;
 		max-width: none;
 		border-right: none;
+		flex: 1;
 	}
 
 	.registry-divider,
@@ -1850,11 +1894,11 @@ button:disabled {
 }
 
 /* ---- Responsive: PC / large screens ---- */
-@media (min-width: 1024px), (hover: hover) and (pointer: fine) {
+/* @media (min-width: 1024px), (hover: hover) and (pointer: fine) {
 	.registry-tree-pane {
 		width: 30%;
 	}
-}
+} */
 
 /* Dark mode overrides for JSON highlighting */
 @media (prefers-color-scheme: dark) {

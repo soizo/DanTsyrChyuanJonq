@@ -388,13 +388,27 @@ class VersionControl {
     }
 }
 
+// Project ID
+const PROJECT_ID_KEY = 'wordMemoryProjectId';
+
+function getProjectId() {
+    let id = localStorage.getItem(PROJECT_ID_KEY);
+    if (!id) {
+        id = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+        localStorage.setItem(PROJECT_ID_KEY, id);
+    }
+    return id;
+}
+
 // Data storage
 let words = [];
 let isFullMode = false;
+let hideMeaning = false;
 let editingIndex = -1;
 let selectedWords = new Set();
 let isSelectMode = false;
 let versionControl = null;
+let wordSortMode = 'alpha'; // 'alpha' or 'chrono'
 
 const SPEAKER_ICON_SVG = '<svg class="icon-speaker" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 10v4c0 1.1.9 2 2 2h2.35l3.38 2.7c.93.74 2.27.08 2.27-1.1V6.4c0-1.18-1.34-1.84-2.27-1.1L7.35 8H5c-1.1 0-2 .9-2 2Zm14.5 2c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03ZM15 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/></svg>';
 const DATE_INPUT_ICON_ONLY_THRESHOLD = 120;
@@ -936,7 +950,7 @@ const modeToggle = document.getElementById('modeToggle');
 
 function toggleMode() {
     modeToggle.classList.toggle('active');
-    isFullMode = !isFullMode;
+    hideMeaning = !hideMeaning;
     renderWords();
 }
 
@@ -1197,6 +1211,14 @@ function toggleWordSelection(index) {
     updateWordSelectionUI();
 }
 
+// Toggle sort mode
+function toggleSortMode() {
+    wordSortMode = wordSortMode === 'alpha' ? 'chrono' : 'alpha';
+    const btn = document.getElementById('sortModeBtn');
+    if (btn) btn.textContent = wordSortMode === 'alpha' ? 'A-Z' : 'Date';
+    renderWords();
+}
+
 // Toggle select mode
 function toggleSelectMode() {
     isSelectMode = !isSelectMode;
@@ -1238,13 +1260,7 @@ function updateBatchToolbar() {
 
 // Select all words
 function selectAll() {
-    const filteredWords = words.filter(w => {
-        if (isFullMode) {
-            return w.weight >= -3;
-        } else {
-            return w.weight >= 0;
-        }
-    });
+    const filteredWords = words.filter(w => w.weight >= -3);
 
     filteredWords.forEach(w => {
         const index = words.indexOf(w);
@@ -1266,13 +1282,7 @@ function selectNone() {
 
 // Invert selection
 function selectInvert() {
-    const filteredWords = words.filter(w => {
-        if (isFullMode) {
-            return w.weight >= -3;
-        } else {
-            return w.weight >= 0;
-        }
-    });
+    const filteredWords = words.filter(w => w.weight >= -3);
 
     const newSelection = new Set();
     filteredWords.forEach(w => {
@@ -1625,20 +1635,14 @@ document.getElementById('editModal').addEventListener('click', function(e) {
 function renderWords() {
     const container = document.getElementById('wordList');
 
-    // Filter words
-    let filteredWords = words.filter(w => {
-        if (isFullMode) {
-            return w.weight >= -3; // Show -3, -2, -1, 0, 1, 2, 3, 4, 5+
-        } else {
-            return w.weight >= 0; // Show only 0, 1, 2, 3, 4, 5+
-        }
-    });
+    // Show all words
+    let filteredWords = words.filter(w => w.weight >= -3);
 
     if (filteredWords.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">—</div>
-                <div>${isFullMode ? 'No Words' : 'No Words to Review'}</div>
+                <div>No Words</div>
             </div>
         `;
         return;
@@ -1655,7 +1659,11 @@ function renderWords() {
 
     // Sort within groups
     Object.keys(groups).forEach(weight => {
-        groups[weight].sort((a, b) => a.word.localeCompare(b.word));
+        if (wordSortMode === 'chrono') {
+            groups[weight].sort((a, b) => (a.added || '').localeCompare(b.added || ''));
+        } else {
+            groups[weight].sort((a, b) => a.word.localeCompare(b.word));
+        }
     });
 
     // Sort groups by weight
@@ -1707,8 +1715,8 @@ function renderWords() {
                         </div>
                         <div class="word-weight ${weightShapeClass}">${weightDisplay}</div>
                     </div>
-                    <div class="word-meaning">${w.meaning}</div>
-                    <div class="word-meta">Added: ${w.added}</div>
+                    <div class="word-meaning"${hideMeaning ? ' style="visibility:hidden;height:0;margin:0;overflow:hidden;"' : ''}>${w.meaning}</div>
+                    <div class="word-meta">Added: ${getSpecialDateLabel(w.added) || w.added}</div>
                     ${!isSelectMode ? `<div class="word-actions">
                         ${w.weight >= 0 ? `<button class="btn-remember" onclick="updateWeight(${originalIndex}, -1)">Down</button>` : ''}
                         ${w.weight >= -1 && w.weight < 10 ? `<button class="btn-forget" onclick="updateWeight(${originalIndex}, 1)">Up</button>` : ''}
@@ -1774,7 +1782,11 @@ function loadData() {
 // Export data
 // Export data only (without version history)
 function exportDataOnly() {
-    const dataStr = JSON.stringify(words, null, 2);
+    const exportObj = {
+        projectId: getProjectId(),
+        words: words
+    };
+    const dataStr = JSON.stringify(exportObj, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1793,6 +1805,7 @@ function exportWithVersionHistory() {
     }
 
     const exportData = {
+        projectId: getProjectId(),
         words: words,
         versionHistory: {
             format: 'tree-v1',
@@ -1934,6 +1947,21 @@ function importWordsOnly(wordsData) {
     }
 }
 
+// Import as overwrite: use imported data, create a new branch in registry-tree
+function importAsOverwrite(wordsData, description) {
+    const { processed } = processImportedWords(wordsData);
+    words = processed;
+    localStorage.setItem('wordMemoryData', JSON.stringify(words));
+
+    // Create a new version branching from current
+    if (versionControl) {
+        versionControl.createVersion(words, description || `Overwrite import (${processed.length} words)`);
+    }
+
+    renderWords();
+    showStatus(`Overwrite imported ${processed.length} words as new branch`, 'success');
+}
+
 // Import data with version history
 function importWithVersionHistory(importedData) {
     const { processed, validCount, invalidCount } = processImportedWords(importedData.words);
@@ -1962,7 +1990,7 @@ function importWithVersionHistory(importedData) {
     }
 }
 
-// Import data (enhanced with version history support)
+// Import data (enhanced with version history and projectId support)
 function importData(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1971,13 +1999,15 @@ function importData(event) {
     reader.onload = function(e) {
         try {
             const imported = JSON.parse(e.target.result);
+            const localProjectId = getProjectId();
+            const importedProjectId = imported.projectId || null;
+            const isSameProject = importedProjectId && importedProjectId === localProjectId;
 
             // Check if it contains version history
             if (imported.versionHistory) {
                 const validation = validateVersionHistory(imported.versionHistory);
 
                 if (!validation.valid) {
-                    // Version history is corrupted, ask user
                     if (confirm(`Version history is corrupted: ${validation.error}\n\nContinue importing data only (version history will be cleared)?`)) {
                         importWordsOnly(imported.words || imported);
                     }
@@ -1985,9 +2015,19 @@ function importData(event) {
                     return;
                 }
 
-                // Version history is valid, ask user to confirm full import
-                if (confirm(`Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`)) {
-                    importWithVersionHistory(imported);
+                if (isSameProject) {
+                    // Same project: ask overwrite (creates new branch) or full replace
+                    if (confirm(`Same project detected.\nOverwrite current data? (imported data will be added as a new branch in version history)`)) {
+                        importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
+                    }
+                } else {
+                    if (confirm(`Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`)) {
+                        importWithVersionHistory(imported);
+                        // Adopt the imported project's ID
+                        if (importedProjectId) {
+                            localStorage.setItem(PROJECT_ID_KEY, importedProjectId);
+                        }
+                    }
                 }
             } else if (Array.isArray(imported)) {
                 // Old format - words array only
@@ -1995,9 +2035,17 @@ function importData(event) {
                     importWordsOnly(imported);
                 }
             } else if (imported.words && Array.isArray(imported.words)) {
-                // Object with words array but no version history
-                if (confirm(`Import ${imported.words.length} words? This will overwrite current data and clear version history.`)) {
-                    importWordsOnly(imported.words);
+                if (isSameProject) {
+                    if (confirm(`Same project detected.\nOverwrite current data? (imported data will be added as a new branch in version history)`)) {
+                        importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
+                    }
+                } else {
+                    if (confirm(`Import ${imported.words.length} words? This will overwrite current data and clear version history.`)) {
+                        importWordsOnly(imported.words);
+                        if (importedProjectId) {
+                            localStorage.setItem(PROJECT_ID_KEY, importedProjectId);
+                        }
+                    }
                 }
             } else {
                 showStatus('Invalid file format', 'error');
@@ -2129,11 +2177,13 @@ function formatVersionDate(date) {
 let _historySelectedId = null;
 let _historyExpandedSet = new Set();
 let _historyPreviewMode = 'version'; // 'version' or 'diff'
+let _historyCheckedSet = new Set(); // For batch operations
 
 function openHistoryModal() {
     if (!versionControl) return;
 
     _historyExpandedSet.clear();
+    _historyCheckedSet.clear();
     _historySelectedId = null;
     const currentId = versionControl.currentId;
     const rootId = versionControl.rootId;
@@ -2199,6 +2249,7 @@ function openHistoryModal() {
     updateRegistryStatus();
     updateRegistryAddressBar();
     updatePreviewTabs();
+    updateRegistryToolbarButtons();
 }
 
 function closeHistoryModal() {
@@ -2323,9 +2374,12 @@ function buildTreeNodeHTML(versionId, depth, parentLines) {
     if (isCurrent) rowClass += ' current-version';
     if (isSelected) rowClass += ' selected';
 
+    const isChecked = _historyCheckedSet.has(versionId);
+
     let html = `<div class="tree-node">`;
     html += `<div class="${rowClass}" data-id="${versionId}" onclick="selectVersionNode('${versionId}')" ondblclick="goToVersionById('${versionId}')">`;
     html += indentHTML;
+    html += `<input type="checkbox" class="tree-checkbox" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleTreeCheck('${versionId}')" tabindex="-1">`;
     html += `<span class="${toggleClass}" onclick="event.stopPropagation(); toggleTreeNode('${versionId}')"></span>`;
     html += `<span class="tree-label">`;
     html += `<span class="tree-label-desc">${escapeHtml(desc)}</span>`;
@@ -2369,6 +2423,118 @@ function toggleTreeNode(versionId) {
         _historyExpandedSet.add(versionId);
     }
     renderRegistryTree();
+}
+
+function toggleTreeCheck(versionId) {
+    if (_historyCheckedSet.has(versionId)) {
+        _historyCheckedSet.delete(versionId);
+    } else {
+        _historyCheckedSet.add(versionId);
+    }
+    updateRegistryToolbarButtons();
+    renderRegistryTree();
+}
+
+function updateRegistryToolbarButtons() {
+    const deleteBtn = document.getElementById('registryDeleteBtn');
+    const renameBtn = document.getElementById('registryRenameBtn');
+    const hasChecked = _historyCheckedSet.size > 0;
+    const hasSingleChecked = _historyCheckedSet.size === 1;
+
+    if (deleteBtn) {
+        deleteBtn.disabled = !hasChecked;
+        deleteBtn.textContent = hasChecked ? `Del (${_historyCheckedSet.size})` : 'Del';
+    }
+    if (renameBtn) {
+        renameBtn.disabled = !hasSingleChecked;
+    }
+}
+
+function deleteSelectedVersions() {
+    if (_historyCheckedSet.size === 0) return;
+
+    // Check if current version is in the set
+    const currentId = versionControl.currentId;
+    const deletingCurrent = _historyCheckedSet.has(currentId);
+    const deletingRoot = _historyCheckedSet.has(versionControl.rootId);
+
+    if (deletingRoot) {
+        alert('Cannot delete the root version.');
+        return;
+    }
+
+    // Check if any checked version is an ancestor of current
+    let wouldOrphanCurrent = false;
+    if (!deletingCurrent) {
+        for (const checkedId of _historyCheckedSet) {
+            // Check if checkedId is an ancestor of currentId
+            let id = currentId;
+            while (id) {
+                if (id === checkedId) { wouldOrphanCurrent = true; break; }
+                const v = versionControl.versions.get(id);
+                id = v ? v.parentId : null;
+            }
+            if (wouldOrphanCurrent) break;
+        }
+    }
+
+    if (deletingCurrent || wouldOrphanCurrent) {
+        alert('Cannot delete versions in the current version path.');
+        return;
+    }
+
+    if (!confirm(`Delete ${_historyCheckedSet.size} version(s) and all their children? This cannot be undone.`)) {
+        return;
+    }
+
+    for (const versionId of _historyCheckedSet) {
+        const version = versionControl.versions.get(versionId);
+        if (!version) continue;
+
+        // Remove from parent's children
+        if (version.parentId) {
+            const parent = versionControl.versions.get(version.parentId);
+            if (parent) {
+                parent.children = parent.children.filter(id => id !== versionId);
+            }
+        }
+
+        versionControl.deleteVersionAndChildren(versionId);
+    }
+
+    versionControl.saveHistory();
+    _historyCheckedSet.clear();
+
+    if (_historySelectedId && !versionControl.versions.has(_historySelectedId)) {
+        _historySelectedId = versionControl.currentId;
+    }
+
+    renderRegistryTree();
+    renderRegistryPreview();
+    updateRegistryStatus();
+    updateRegistryAddressBar();
+    updateRegistryToolbarButtons();
+    showStatus(`Deleted ${_historyCheckedSet.size || 'selected'} version(s)`, 'success');
+}
+
+function renameSelectedVersion() {
+    if (_historyCheckedSet.size !== 1) return;
+
+    const versionId = Array.from(_historyCheckedSet)[0];
+    const version = versionControl.versions.get(versionId);
+    if (!version) return;
+
+    const newDesc = prompt('Rename version:', version.description || '');
+    if (newDesc === null) return;
+
+    version.description = newDesc.trim() || version.description;
+    versionControl.saveHistory();
+
+    _historyCheckedSet.clear();
+    renderRegistryTree();
+    renderRegistryPreview();
+    updateRegistryAddressBar();
+    updateRegistryToolbarButtons();
 }
 
 function selectVersionNode(versionId) {
