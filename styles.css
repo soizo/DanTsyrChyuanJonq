@@ -91,7 +91,7 @@ body {
 .container {
 	max-width: 680px;
 	margin: 0 auto;
-	padding: var(--space-2xl) var(--space-lg);
+	padding: var(--space-lg) var(--space-md);
 	min-height: 100vh;
 }
 
@@ -144,7 +144,7 @@ h1 img {
 	border: 1px solid var(--color-border);
 }
 
-@media (min-width: 768px) {
+@media (min-width: 680px) {
 	.workspace-left .mode-switch {
 		position: sticky;
 		top: env(safe-area-inset-top);
@@ -152,7 +152,7 @@ h1 img {
 	}
 }
 
-@media (max-width: 767px) and (orientation: portrait) {
+@media (max-width: 680px) and (orientation: portrait) {
 	.mode-switch {
 		z-index: 40;
 		width: auto;
@@ -1046,6 +1046,7 @@ button:disabled {
 	margin-left: 4px;
 	user-select: none;
 	-webkit-user-select: none;
+	transform: translateY(-3px);
 }
 
 .btn-pronounce {
@@ -2004,7 +2005,7 @@ button:disabled {
 }
 
 /* ---- Responsive: Portrait mobile ---- */
-@media (max-width: 767px) and (orientation: portrait) {
+@media (max-width: 680px) and (orientation: portrait) {
 	.registry-container {
 		position: relative;
 	}
@@ -2028,7 +2029,7 @@ button:disabled {
 }
 
 /* ---- Responsive: Landscape mobile ---- */
-@media (max-width: 767px) and (orientation: landscape) and (hover: none) and (pointer: coarse) {
+@media (max-width: 680px) and (orientation: landscape) and (hover: none) and (pointer: coarse) {
 	.registry-tree-pane {
 		width: 35%;
 		max-width: 280px;
@@ -2091,13 +2092,13 @@ body.drag-import-active .drag-import-overlay {
    Responsive
    ======================================== */
 
-@media (min-width: 768px) {
+@media (min-width: 680px) {
 	body {
 		overflow: hidden;
 	}
 
 	.container {
-		padding: var(--space-2xl);
+		padding: var(--space-xl);
 		height: 100vh;
 		min-height: 100vh;
 		height: 100dvh;
@@ -2126,7 +2127,7 @@ body.drag-import-active .drag-import-overlay {
 	}
 }
 
-@media (min-width: 768px) {
+@media (min-width: 680px) {
 	.container {
 		max-width: 1280px;
 	}
@@ -2226,20 +2227,6 @@ body.is-resizing-layout * {
 	.batch-toolbar-label {
 		width: 100%;
 		margin-bottom: 4px;
-	}
-}
-
-/* iPad Landscape */
-@media (min-width: 768px) and (max-width: 1024px) and (orientation: landscape) {
-	.container {
-		max-width: 100%;
-		padding: var(--space-lg) var(--space-2xl);
-	}
-
-	.add-form {
-		max-width: 600px;
-		margin-left: auto;
-		margin-right: auto;
 	}
 }
 
