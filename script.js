@@ -414,6 +414,11 @@ class VersionControl {
 
 // Project ID
 const PROJECT_ID_KEY = 'wordMemoryProjectId';
+const APP_SETTINGS_KEY = 'wordMemoryAppSettings';
+const DEFAULT_APP_SETTINGS = {
+    deleteSoundEnabled: true,
+    audioPreloadEnabled: true
+};
 
 function createProjectId() {
     return crypto.randomUUID
@@ -435,6 +440,40 @@ function getProjectId() {
     return id;
 }
 
+function sanitizeAppSettings(rawSettings) {
+    const parsed = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
+    const deleteSoundEnabled = typeof parsed.deleteSoundEnabled === 'boolean'
+        ? parsed.deleteSoundEnabled
+        : DEFAULT_APP_SETTINGS.deleteSoundEnabled;
+    const audioPreloadEnabled = typeof parsed.audioPreloadEnabled === 'boolean'
+        ? parsed.audioPreloadEnabled
+        : DEFAULT_APP_SETTINGS.audioPreloadEnabled;
+
+    return {
+        deleteSoundEnabled,
+        audioPreloadEnabled
+    };
+}
+
+function loadAppSettings() {
+    try {
+        const raw = localStorage.getItem(APP_SETTINGS_KEY);
+        if (!raw) {
+            return sanitizeAppSettings(null);
+        }
+        return sanitizeAppSettings(JSON.parse(raw));
+    } catch (error) {
+        return sanitizeAppSettings(null);
+    }
+}
+
+function saveAppSettings() {
+    try {
+        localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(appSettings));
+    } catch (error) {
+    }
+}
+
 // Data storage
 let words = [];
 let isFullMode = false;
@@ -444,11 +483,121 @@ let selectedWords = new Set();
 let isSelectMode = false;
 let versionControl = null;
 let wordSortMode = 'alpha'; // 'alpha' or 'chrono'
+let appSettings = sanitizeAppSettings(null);
+
+// Audio preload cache: word -> { url, buffer (decoded AudioBuffer), status }
+const audioCache = new Map();
+// status: 'fetching' | 'ready' | 'failed'
+let audioPreloadObserver = null;
+let deleteSoundAudio = null;
+
+function preloadAudioForWord(word) {
+    if (audioCache.has(word)) return;
+    audioCache.set(word, { status: 'fetching', url: null, buffer: null });
+
+    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(word)}`)
+        .then(r => {
+            if (!r.ok) throw new Error('API failed');
+            return r.json();
+        })
+        .then(data => {
+            const audioUrl = data[0]?.phonetics?.find(p => p.audio)?.audio;
+            if (!audioUrl) throw new Error('No audio URL');
+            const entry = audioCache.get(word);
+            if (!entry) return;
+            entry.url = audioUrl;
+            // Prefetch and decode the audio buffer
+            return fetch(audioUrl)
+                .then(r => r.arrayBuffer())
+                .then(buf => {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioCtx) {
+                        entry.status = 'ready';
+                        return;
+                    }
+                    const ctx = new AudioCtx();
+                    return ctx.decodeAudioData(buf).then(decoded => {
+                        entry.buffer = decoded;
+                        entry.status = 'ready';
+                        ctx.close();
+                    }).catch(() => {
+                        entry.status = 'ready'; // URL is still valid, just buffer failed
+                        ctx.close();
+                    });
+                });
+        })
+        .catch(() => {
+            const entry = audioCache.get(word);
+            if (entry) entry.status = 'failed';
+        });
+}
+
+function setupAudioPreloadObserver() {
+    if (!appSettings.audioPreloadEnabled) {
+        if (audioPreloadObserver) {
+            audioPreloadObserver.disconnect();
+            audioPreloadObserver = null;
+        }
+        return;
+    }
+
+    if (audioPreloadObserver) audioPreloadObserver.disconnect();
+
+    audioPreloadObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const word = entry.target.dataset.word;
+                if (word) preloadAudioForWord(word);
+            }
+        });
+    }, {
+        root: null,
+        rootMargin: '200px 0px', // preload slightly before scrolling into view
+        threshold: 0
+    });
+
+    document.querySelectorAll('.word-item[data-word]').forEach(el => {
+        audioPreloadObserver.observe(el);
+    });
+}
+
+function applyAudioPreloadSetting() {
+    if (appSettings.audioPreloadEnabled) {
+        setupAudioPreloadObserver();
+        return;
+    }
+
+    if (audioPreloadObserver) {
+        audioPreloadObserver.disconnect();
+        audioPreloadObserver = null;
+    }
+}
+
+function playDeleteSound() {
+    if (!appSettings.deleteSoundEnabled) return;
+
+    if (!deleteSoundAudio) {
+        deleteSoundAudio = new Audio('assets/delete.mp3');
+        deleteSoundAudio.preload = 'auto';
+    }
+
+    try {
+        deleteSoundAudio.currentTime = 0;
+        const playPromise = deleteSoundAudio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {});
+        }
+    } catch (error) {
+    }
+}
 
 const SPEAKER_ICON_SVG = '<svg class="icon-speaker" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 10v4c0 1.1.9 2 2 2h2.35l3.38 2.7c.93.74 2.27.08 2.27-1.1V6.4c0-1.18-1.34-1.84-2.27-1.1L7.35 8H5c-1.1 0-2 .9-2 2Zm14.5 2c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03ZM15 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/></svg>';
 const DATE_INPUT_ICON_ONLY_THRESHOLD = 120;
 let dateInputResizeObserver = null;
-const LAYOUT_BREAKPOINT_QUERY = '(min-width: 768px)';
+const LANDSCAPE_LAYOUT_MIN_WIDTH = 768;
+const PORTRAIT_LAYOUT_MAX_WIDTH = LANDSCAPE_LAYOUT_MIN_WIDTH - 1;
+const LAYOUT_BREAKPOINT_QUERY = `(min-width: ${LANDSCAPE_LAYOUT_MIN_WIDTH}px)`;
+const PORTRAIT_MOBILE_QUERY = `(max-width: ${PORTRAIT_LAYOUT_MAX_WIDTH}px) and (orientation: portrait)`;
 const LAYOUT_SPLIT_STORAGE_KEY = 'wordMemoryLayoutSplitRatio';
 const LAYOUT_MIN_PANEL_WIDTH = 320;
 const LAYOUT_KEYBOARD_STEP = 0.02;
@@ -564,7 +713,7 @@ function ensureDateCompactLabel(input) {
     return label;
 }
 
-function getRelativeDayOffset(isoDate) {
+function parseIsoDateParts(isoDate) {
     if (!isoDate) return null;
 
     const parts = isoDate.split('-');
@@ -577,7 +726,14 @@ function getRelativeDayOffset(isoDate) {
         return null;
     }
 
-    const targetDate = new Date(year, month - 1, day);
+    return { year, month, day };
+}
+
+function getRelativeDayOffset(isoDate) {
+    const parsed = parseIsoDateParts(isoDate);
+    if (!parsed) return null;
+
+    const targetDate = new Date(parsed.year, parsed.month - 1, parsed.day);
     const today = new Date();
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const targetStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
@@ -601,34 +757,39 @@ function getSpecialDateLabel(isoDate, shortLabel = false) {
     return '';
 }
 
+function formatDateByRules(isoDate) {
+    const parsed = parseIsoDateParts(isoDate);
+    if (!parsed) return isoDate || '';
+
+    const currentYear = new Date().getFullYear();
+    if (parsed.year === currentYear) {
+        return `${parsed.month}-${parsed.day}`;
+    }
+
+    const sameCentury = Math.floor(parsed.year / 100) === Math.floor(currentYear / 100);
+    if (sameCentury) {
+        return `${parsed.year % 100}-${parsed.month}-${parsed.day}`;
+    }
+
+    return `${parsed.year}-${parsed.month}-${parsed.day}`;
+}
+
 function formatCompactDateLabel(isoDate) {
     if (!isoDate) return '';
 
     const specialShort = getSpecialDateLabel(isoDate, true);
     if (specialShort) return specialShort;
 
-    const parts = isoDate.split('-');
-    if (parts.length !== 3) return isoDate;
+    return formatDateByRules(isoDate);
+}
 
-    const year = Number(parts[0]);
-    const month = Number(parts[1]);
-    const day = Number(parts[2]);
+function formatAddedDateLabel(isoDate) {
+    if (!isoDate) return '';
 
-    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-        return isoDate;
-    }
+    const specialLabel = getSpecialDateLabel(isoDate, false);
+    if (specialLabel) return specialLabel;
 
-    const currentYear = new Date().getFullYear();
-    if (year === currentYear) {
-        return `${month}-${day}`;
-    }
-
-    const sameCentury = Math.floor(year / 100) === Math.floor(currentYear / 100);
-    if (sameCentury) {
-        return `${String(year % 100).padStart(2, '0')}-${month}-${day}`;
-    }
-
-    return `${year}-${month}-${day}`;
+    return formatDateByRules(isoDate);
 }
 
 function syncDateInputDisplayMode() {
@@ -909,6 +1070,7 @@ function shouldHandleRegistryPreviewSelectAll(event, isInputFocused) {
 // Initialize
 window.onload = function() {
     loadData();
+    appSettings = loadAppSettings();
 
     // Initialize version control
     versionControl = new VersionControl(50);
@@ -918,6 +1080,11 @@ window.onload = function() {
         versionControl.createVersion(words, 'Initial version');
     } else if (versionControl.versions.size === 0 && words.length === 0) {
         versionControl.createVersion([], 'Initial empty state');
+    }
+
+    if (appSettings.deleteSoundEnabled) {
+        deleteSoundAudio = new Audio('assets/delete.mp3');
+        deleteSoundAudio.preload = 'auto';
     }
 
     renderWords();
@@ -979,7 +1146,7 @@ function measureModeSwitchNaturalTop() {
 function updatePortraitModeSwitchTop() {
     if (!modeSwitch || !pageTitle) return;
 
-    if (!window.matchMedia('(orientation: portrait)').matches) {
+    if (!window.matchMedia(PORTRAIT_MOBILE_QUERY).matches) {
         modeSwitch.classList.remove('is-fixed');
         if (modeSwitchPlaceholder) modeSwitchPlaceholder.style.display = 'none';
         modeSwitchNaturalTop = null;
@@ -1045,7 +1212,7 @@ function togglePosDropdown() {
 function renderPosSelection(containerId, values) {
     const container = document.getElementById(containerId);
     if (values.length === 0) {
-        container.innerHTML = '<span class="pos-placeholder">▽</span>';
+        container.innerHTML = '<span class="pos-placeholder">POS</span>';
     } else {
         container.innerHTML = values.map(p => `<span class="pos-tag">${p}</span>`).join('');
     }
@@ -1256,6 +1423,7 @@ async function deleteWord(index) {
 
     words.splice(index, 1);
     saveData(false, `－　${wordName}`);
+    playDeleteSound();
     renderWords();
     showStatus('Word deleted', 'success');
 }
@@ -1595,18 +1763,45 @@ async function batchDeleteConfirm() {
     });
     selectedWords.clear();
     saveData(false, `－　${count}`);
+    playDeleteSound();
     renderWords();
     updateBatchToolbar();
     showStatus(`Deleted ${count} word(s)`, 'success');
 }
 
-// Pronunciation
+// Pronunciation — uses preloaded audio cache for instant playback
 function pronounceWord(word) {
-    // Create AudioContext in user gesture context — stays unlocked on iOS Safari
+    const cached = audioCache.get(word);
+
+    // If cache has a decoded buffer, play it instantly via AudioContext
+    if (cached && cached.status === 'ready' && cached.buffer) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+            const ctx = new AudioCtx();
+            const source = ctx.createBufferSource();
+            source.buffer = cached.buffer;
+            source.connect(ctx.destination);
+            source.start(0);
+            source.onended = () => ctx.close();
+            showStatus(`Playing "${word}"`, 'info');
+            return;
+        }
+    }
+
+    // If cache has a URL but no buffer, use Audio element
+    if (cached && cached.status === 'ready' && cached.url) {
+        const audio = new Audio(cached.url);
+        audio.play().then(() => {
+            showStatus(`Playing "${word}"`, 'info');
+        }).catch(() => pronounceFallback(word));
+        return;
+    }
+
+    // If cache failed or not yet loaded, fetch on demand
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     const audioCtx = AudioCtx ? new AudioCtx() : null;
 
-    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${word}`)
+    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(word)}`)
         .then(response => {
             if (!response.ok) throw new Error('API failed');
             return response.json();
@@ -1615,12 +1810,18 @@ function pronounceWord(word) {
             const audioUrl = data[0]?.phonetics?.find(p => p.audio)?.audio;
             if (!audioUrl) throw new Error('No audio URL');
 
+            // Store in cache for future use
+            if (!audioCache.has(word)) audioCache.set(word, { status: 'ready', url: audioUrl, buffer: null });
+            else { const e = audioCache.get(word); e.url = audioUrl; e.status = 'ready'; }
+
             if (audioCtx) {
-                // Play via AudioContext for iOS compatibility
                 return fetch(audioUrl)
                     .then(r => r.arrayBuffer())
                     .then(buf => audioCtx.decodeAudioData(buf))
                     .then(decoded => {
+                        // Cache the decoded buffer
+                        const entry = audioCache.get(word);
+                        if (entry) entry.buffer = decoded;
                         const source = audioCtx.createBufferSource();
                         source.buffer = decoded;
                         source.connect(audioCtx.destination);
@@ -1637,24 +1838,26 @@ function pronounceWord(word) {
         })
         .catch(() => {
             if (audioCtx) audioCtx.close().catch(() => {});
-            // Fallback to Web Speech API with British English
-            if ('speechSynthesis' in window) {
-                // iOS fix: cancel pending speech to avoid idle bug
-                speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance(word);
-                utterance.lang = 'en-GB';
-                utterance.rate = 0.8;
-                const voices = speechSynthesis.getVoices();
-                const britishVoice = voices.find(voice =>
-                    voice.lang.startsWith('en-GB') || voice.lang.startsWith('en-UK')
-                );
-                if (britishVoice) utterance.voice = britishVoice;
-                speechSynthesis.speak(utterance);
-                showStatus(`Pronouncing "${word}"`, 'info');
-            } else {
-                showStatus('Pronunciation not supported', 'error');
-            }
+            pronounceFallback(word);
         });
+}
+
+function pronounceFallback(word) {
+    if ('speechSynthesis' in window) {
+        speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(word);
+        utterance.lang = 'en-GB';
+        utterance.rate = 0.8;
+        const voices = speechSynthesis.getVoices();
+        const britishVoice = voices.find(voice =>
+            voice.lang.startsWith('en-GB') || voice.lang.startsWith('en-UK')
+        );
+        if (britishVoice) utterance.voice = britishVoice;
+        speechSynthesis.speak(utterance);
+        showStatus(`Pronouncing "${word}"`, 'info');
+    } else {
+        showStatus('Pronunciation not supported', 'error');
+    }
 }
 
 // Open edit modal
@@ -1734,6 +1937,7 @@ function renderWords() {
                 <div>No Words</div>
             </div>
         `;
+        applyAudioPreloadSetting();
         return;
     }
 
@@ -1792,7 +1996,7 @@ function renderWords() {
                 : '';
 
             html += `
-                <div class="word-item ${masteredClass} ${invalidClass}${isSelectMode ? ' select-mode' : ''}" ${isSelectMode ? `onclick="toggleWordSelection(${originalIndex})"` : ''}>
+                <div class="word-item ${masteredClass} ${invalidClass}${isSelectMode ? ' select-mode' : ''}" data-word="${w.word}" ${isSelectMode ? `onclick="toggleWordSelection(${originalIndex})"` : ''}>
                     <div class="word-header">
                         <div style="display: flex; align-items: center; gap: 8px;">
                             ${isSelectMode ? `<input type="checkbox" id="select-${originalIndex}" class="word-checkbox" ${selectedWords.has(originalIndex) ? 'checked' : ''} tabindex="-1">` : ''}
@@ -1805,7 +2009,7 @@ function renderWords() {
                         <div class="word-weight ${weightShapeClass}">${weightDisplay}</div>
                     </div>
                     <div class="word-meaning"${hideMeaning ? ' style="visibility:hidden;height:0;margin:0;overflow:hidden;"' : ''}>${w.meaning}</div>
-                    <div class="word-meta">Added: ${getSpecialDateLabel(w.added) || w.added}</div>
+                    <div class="word-meta">Added: ${formatAddedDateLabel(w.added)}</div>
                     ${!isSelectMode ? `<div class="word-actions">
                         ${w.weight >= 0 ? `<button class="btn-remember" onclick="updateWeight(${originalIndex}, -1)">Down</button>` : ''}
                         ${w.weight >= -1 && w.weight < 10 ? `<button class="btn-forget" onclick="updateWeight(${originalIndex}, 1)">Up</button>` : ''}
@@ -1825,6 +2029,7 @@ function renderWords() {
 
     container.innerHTML = html;
     updateBatchToolbar();
+    applyAudioPreloadSetting();
 }
 
 // Toggle collapse
@@ -2272,8 +2477,16 @@ function openSettingsModal() {
     if (!versionControl) return;
 
     const settings = versionControl.getSettings();
+    const deleteSoundEnabledInput = document.getElementById('deleteSoundEnabledInput');
+    const audioPreloadEnabledInput = document.getElementById('audioPreloadEnabledInput');
     document.getElementById('maxVersionsInput').value = settings.maxVersions;
     document.getElementById('projectIdInput').value = getProjectId();
+    if (deleteSoundEnabledInput) {
+        deleteSoundEnabledInput.checked = appSettings.deleteSoundEnabled;
+    }
+    if (audioPreloadEnabledInput) {
+        audioPreloadEnabledInput.checked = appSettings.audioPreloadEnabled;
+    }
     document.getElementById('settingsModal').classList.add('active');
 }
 
@@ -2286,7 +2499,11 @@ function saveSettings() {
 
     const maxVersions = parseInt(document.getElementById('maxVersionsInput').value, 10);
     const projectIdInput = document.getElementById('projectIdInput');
+    const deleteSoundEnabledInput = document.getElementById('deleteSoundEnabledInput');
+    const audioPreloadEnabledInput = document.getElementById('audioPreloadEnabledInput');
     const projectId = projectIdInput ? projectIdInput.value.trim() : '';
+    const nextDeleteSoundEnabled = deleteSoundEnabledInput ? deleteSoundEnabledInput.checked : DEFAULT_APP_SETTINGS.deleteSoundEnabled;
+    const nextAudioPreloadEnabled = audioPreloadEnabledInput ? audioPreloadEnabledInput.checked : DEFAULT_APP_SETTINGS.audioPreloadEnabled;
 
     if (isNaN(maxVersions) || maxVersions < 10 || maxVersions > 200) {
         alert('Max versions must be between 10 and 200');
@@ -2308,6 +2525,21 @@ function saveSettings() {
     if (projectIdInput) {
         projectIdInput.value = projectId;
     }
+
+    appSettings = sanitizeAppSettings({
+        deleteSoundEnabled: nextDeleteSoundEnabled,
+        audioPreloadEnabled: nextAudioPreloadEnabled
+    });
+    saveAppSettings();
+    applyAudioPreloadSetting();
+
+    if (!appSettings.deleteSoundEnabled) {
+        deleteSoundAudio = null;
+    } else if (!deleteSoundAudio) {
+        deleteSoundAudio = new Audio('assets/delete.mp3');
+        deleteSoundAudio.preload = 'auto';
+    }
+
     showStatus('Settings saved', 'success');
     closeSettingsModal();
 }
@@ -2847,6 +3079,7 @@ async function deleteSelectedVersions() {
     updateRegistryStatus();
     updateRegistryAddressBar();
     updateRegistryToolbarButtons();
+    playDeleteSound();
 
     if (hadRootSelected) {
         showStatus(`Deleted ${selectedCount} version(s). Root version was skipped.`, 'success');
@@ -2892,7 +3125,7 @@ function selectVersionNode(versionId) {
 }
 
 function isPortraitMobile() {
-    return window.innerWidth < 768 && window.innerHeight > window.innerWidth;
+    return window.matchMedia(PORTRAIT_MOBILE_QUERY).matches;
 }
 
 // ---- Mobile Preview (portrait) ----

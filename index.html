@@ -48,7 +48,7 @@
                             <label>POS</label>
                             <div class="dropdown-container pos-selector" id="posSelector">
                                 <div class="dropdown-selected pos-selected" id="posSelected">
-                                    <span class="pos-placeholder">▽</span>
+                                    <span class="pos-placeholder">POS</span>
                                 </div>
                                 <div class="dropdown-menu pos-dropdown" id="posDropdown">
                                     <label class="dropdown-option pos-option" data-value="n" onclick="togglePosOption(this, event)">n.</label>
@@ -236,35 +236,53 @@
             <div class="modal-header">Settings</div>
 
             <div class="form-row">
-                <label>Max Versions</label>
-                <input type="number" id="maxVersionsInput" min="10" max="200" value="50">
-            </div>
-
-            <div class="form-row">
                 <label>Profile ID</label>
                 <input type="text" id="projectIdInput" autocomplete="off" spellcheck="false">
-                <div style="display: flex; gap: 8px; margin-top: 8px;">
-                    <button class="btn-secondary" onclick="generateProjectIdForSettings()" style="margin-top: 0;">Generate New ID</button>
+                <div class="settings-inline-actions">
+                    <button class="btn-secondary" onclick="generateProjectIdForSettings()">Generate New ID</button>
                 </div>
             </div>
 
             <div class="form-row">
                 <label>Export Options</label>
-                <div style="display: flex; gap: 8px;">
-                    <button class="btn-secondary" onclick="exportDataOnly()" style="margin-top: 0;">Data Only</button>
-                    <button class="btn-secondary" onclick="exportWithVersionHistory()" style="margin-top: 0;">With Version History</button>
+                <div class="settings-inline-actions">
+                    <button class="btn-secondary" onclick="exportDataOnly()">Data Only</button>
+                    <button class="btn-secondary" onclick="exportWithVersionHistory()">With Version History</button>
                 </div>
             </div>
 
             <div class="form-row">
                 <label>Version History</label>
-                <button class="btn-secondary" onclick="openHistoryModal()" style="margin-top: 0;">View History</button>
+                <input type="number" id="maxVersionsInput" min="10" max="200" value="50">
+                <div class="settings-inline-actions">
+                    <button class="btn-secondary" onclick="openHistoryModal()">View History</button>
+                </div>
             </div>
 
-            <div class="modal-actions">
-                <button class="btn-primary" onclick="saveSettings()">Save</button>
-                <button class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
+            <div class="form-row">
+                <label>Behavior</label>
+                <div class="settings-toggle-list">
+                    <div class="settings-toggle-item">
+                        <div class="settings-toggle-copy">
+                            <label class="settings-toggle-title" for="deleteSoundEnabledInput">Delete Sound</label>
+                            <div class="settings-toggle-desc">Play <code>assets/delete.mp3</code> on delete actions.</div>
+                        </div>
+                        <input type="checkbox" id="deleteSoundEnabledInput" aria-label="Delete sound">
+                    </div>
+                    <div class="settings-toggle-item">
+                        <div class="settings-toggle-copy">
+                            <label class="settings-toggle-title" for="audioPreloadEnabledInput">Word Preload</label>
+                            <div class="settings-toggle-desc">Preload pronunciation audio before playback.</div>
+                        </div>
+                        <input type="checkbox" id="audioPreloadEnabledInput" aria-label="Word preload">
+                    </div>
+                </div>
             </div>
+
+        </div>
+        <div class="modal-actions">
+            <button class="btn-primary" onclick="saveSettings()">Save</button>
+            <button class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
         </div>
     </div>
 
