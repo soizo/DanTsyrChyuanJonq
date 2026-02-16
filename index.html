@@ -124,9 +124,9 @@
                         <div class="batch-toolbar-label">Date:</div>
                         <div class="batch-toolbar-controls">
                             <div class="range-input-group">
-                                <input type="date" id="dateMinInput" class="range-input range-input-date">
+                                <input type="date" id="dateMinInput" class="range-input-date">
                                 <span class="range-separator">~</span>
-                                <input type="date" id="dateMaxInput" class="range-input range-input-date">
+                                <input type="date" id="dateMaxInput" class="range-input-date">
                             </div>
                             <button class="btn-batch btn-batch-add" onclick="addDateRange()">+</button>
                             <button class="btn-batch btn-batch-remove" onclick="removeDateRange()">−</button>
@@ -140,12 +140,16 @@
                             <button class="btn-batch btn-batch-remove" onclick="deselectByRegex()">−</button>
                         </div>
                     </div>
-                    <div class="batch-toolbar-section">
+                    <div class="batch-toolbar-section batch-toolbar-section-actions">
                         <div class="batch-toolbar-label">Actions:</div>
                         <div class="batch-toolbar-controls">
                             <button class="btn-batch btn-batch-up" onclick="batchAdjustWeight(1)" id="batchUpBtn" disabled>Up</button>
                             <button class="btn-batch btn-batch-down" onclick="batchAdjustWeight(-1)" id="batchDownBtn" disabled>Down</button>
                             <button class="btn-batch btn-batch-delete" onclick="batchDeleteConfirm()" id="batchDeleteBtn" disabled>Delete</button>
+                            <div class="batch-actions-date-row">
+                                <input type="date" id="batchDateInput" class="range-input-date batch-set-date-input">
+                                <button class="btn-batch" onclick="batchSetDate()" id="batchSetDateBtn" disabled>Set Date</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -220,7 +224,7 @@
                 </div>
                 <div class="form-row">
                     <label>Date</label>
-                    <input type="date" id="editDateInput">
+                    <input type="date" id="editDateInput" class="range-input-date">
                 </div>
             </div>
             <div class="modal-actions">
@@ -262,12 +266,12 @@
             <div class="form-row">
                 <label>Behavior</label>
                 <div class="settings-toggle-list">
-                    <div class="settings-toggle-item">
+                    <div class="settings-toggle-item" data-setting-name="action-sound" data-setting-meta="put-delete">
                         <div class="settings-toggle-copy">
-                            <label class="settings-toggle-title" for="deleteSoundEnabledInput">Delete Sound</label>
-                            <div class="settings-toggle-desc">Play <code>assets/delete.mp3</code> on delete actions.</div>
+                            <label class="settings-toggle-title" for="actionSoundEnabledInput">Action Sound</label>
+                            <div class="settings-toggle-desc">Play <code>assets/put.mp3</code> on add and <code>assets/delete.mp3</code> on delete actions.</div>
                         </div>
-                        <input type="checkbox" id="deleteSoundEnabledInput" aria-label="Delete sound">
+                        <input type="checkbox" id="actionSoundEnabledInput" aria-label="Action sound">
                     </div>
                     <div class="settings-toggle-item">
                         <div class="settings-toggle-copy">
@@ -276,6 +280,13 @@
                         </div>
                         <input type="checkbox" id="audioPreloadEnabledInput" aria-label="Word preload">
                     </div>
+                </div>
+            </div>
+
+            <div class="form-row danger-zone">
+                <label>Danger Zone</label>
+                <div class="settings-inline-actions">
+                    <button class="btn-danger" onclick="clearAllData()">Clear All Data</button>
                 </div>
             </div>
 

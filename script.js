@@ -245,6 +245,48 @@ class VersionControl {
         return version;
     }
 
+    // Graft an imported version tree as a fork under the local root
+    graftTree(importedVersionsObj, importedRootId, importedCurrentId) {
+        const importedVersions = new Map(Object.entries(importedVersionsObj));
+
+        // Build ID remap: old ID -> new ID
+        const idMap = new Map();
+        for (const oldId of importedVersions.keys()) {
+            idMap.set(oldId, this.generateId());
+        }
+
+        // Re-key and insert all imported versions
+        for (const [oldId, version] of importedVersions) {
+            const newId = idMap.get(oldId);
+            const newVersion = {
+                ...version,
+                id: newId,
+                parentId: oldId === importedRootId
+                    ? this.rootId  // graft point: local root
+                    : (idMap.get(version.parentId) || null),
+                children: (version.children || []).map(cid => idMap.get(cid)).filter(Boolean)
+            };
+            this.versions.set(newId, newVersion);
+        }
+
+        // Add imported root as child of local root
+        const localRoot = this.versions.get(this.rootId);
+        if (localRoot) {
+            localRoot.children.push(idMap.get(importedRootId));
+        }
+
+        // Set current to imported current
+        this.currentId = idMap.get(importedCurrentId) || this.currentId;
+
+        // Prune if needed
+        if (this.versions.size > this.maxVersions) {
+            this.pruneOldVersions();
+        }
+
+        this.saveHistory();
+        return idMap.get(importedCurrentId);
+    }
+
     // Check if version is in current path (from current to root)
     isInCurrentPath(versionId) {
         let current = this.currentId;
@@ -416,7 +458,7 @@ class VersionControl {
 const PROJECT_ID_KEY = 'wordMemoryProjectId';
 const APP_SETTINGS_KEY = 'wordMemoryAppSettings';
 const DEFAULT_APP_SETTINGS = {
-    deleteSoundEnabled: true,
+    actionSoundEnabled: true,
     audioPreloadEnabled: true
 };
 
@@ -440,17 +482,28 @@ function getProjectId() {
     return id;
 }
 
+function toSafeFilenamePart(value) {
+    const normalized = String(value || '').trim();
+    const safe = normalized
+        .replace(/[\\/:*?"<>|]/g, '-')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^\.+|\.+$/g, '')
+        .replace(/^-+|-+$/g, '');
+    return safe || 'unknown';
+}
+
 function sanitizeAppSettings(rawSettings) {
     const parsed = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
-    const deleteSoundEnabled = typeof parsed.deleteSoundEnabled === 'boolean'
-        ? parsed.deleteSoundEnabled
-        : DEFAULT_APP_SETTINGS.deleteSoundEnabled;
+    const actionSoundEnabled = typeof parsed.actionSoundEnabled === 'boolean'
+        ? parsed.actionSoundEnabled
+        : DEFAULT_APP_SETTINGS.actionSoundEnabled;
     const audioPreloadEnabled = typeof parsed.audioPreloadEnabled === 'boolean'
         ? parsed.audioPreloadEnabled
         : DEFAULT_APP_SETTINGS.audioPreloadEnabled;
 
     return {
-        deleteSoundEnabled,
+        actionSoundEnabled,
         audioPreloadEnabled
     };
 }
@@ -482,7 +535,7 @@ let editingIndex = -1;
 let selectedWords = new Set();
 let isSelectMode = false;
 let versionControl = null;
-let wordSortMode = 'alpha'; // 'alpha' or 'chrono'
+let wordSortMode = 'alpha'; // 'alpha', 'alpha-desc', 'chrono', 'chrono-desc'
 let cachedVoices = [];
 let appSettings = sanitizeAppSettings(null);
 
@@ -490,7 +543,8 @@ let appSettings = sanitizeAppSettings(null);
 const audioCache = new Map();
 // status: 'fetching' | 'ready' | 'failed'
 let audioPreloadObserver = null;
-let deleteSoundAudio = null;
+let deleteActionSoundAudio = null;
+let putActionSoundAudio = null;
 
 function preloadAudioForWord(word) {
     if (audioCache.has(word)) return;
@@ -574,17 +628,25 @@ function applyAudioPreloadSetting() {
     }
 }
 
-function playDeleteSound() {
-    if (!appSettings.deleteSoundEnabled) return;
+function playActionSound(actionType) {
+    if (!appSettings.actionSoundEnabled) return;
+    if (actionType !== 'put' && actionType !== 'delete') return;
 
-    if (!deleteSoundAudio) {
-        deleteSoundAudio = new Audio('assets/delete.mp3');
-        deleteSoundAudio.preload = 'auto';
+    const isPut = actionType === 'put';
+    let sound = isPut ? putActionSoundAudio : deleteActionSoundAudio;
+    if (!sound) {
+        sound = new Audio(isPut ? 'assets/put.mp3' : 'assets/delete.mp3');
+        sound.preload = 'auto';
+        if (isPut) {
+            putActionSoundAudio = sound;
+        } else {
+            deleteActionSoundAudio = sound;
+        }
     }
 
     try {
-        deleteSoundAudio.currentTime = 0;
-        const playPromise = deleteSoundAudio.play();
+        sound.currentTime = 0;
+        const playPromise = sound.play();
         if (playPromise && typeof playPromise.catch === 'function') {
             playPromise.catch(() => {});
         }
@@ -1068,6 +1130,43 @@ function shouldHandleRegistryPreviewSelectAll(event, isInputFocused) {
     return Boolean(anchorNode && preview.contains(anchorNode));
 }
 
+function resetAddAndBatchToolbarInputs() {
+    const today = new Date().toISOString().split('T')[0];
+
+    const wordInput = document.getElementById('wordInput');
+    if (wordInput) wordInput.value = '';
+
+    const meaningInput = document.getElementById('meaningInput');
+    if (meaningInput) meaningInput.value = '';
+
+    selectedPos = [];
+    updatePosSelection();
+
+    selectedWeight = 3;
+    updateWeightSelection();
+
+    const dateInput = document.getElementById('dateInput');
+    if (dateInput) dateInput.value = today;
+
+    const weightMinInput = document.getElementById('weightMinInput');
+    if (weightMinInput) weightMinInput.value = '-3';
+
+    const weightMaxInput = document.getElementById('weightMaxInput');
+    if (weightMaxInput) weightMaxInput.value = '';
+
+    const dateMinInput = document.getElementById('dateMinInput');
+    if (dateMinInput) dateMinInput.value = '';
+
+    const dateMaxInput = document.getElementById('dateMaxInput');
+    if (dateMaxInput) dateMaxInput.value = '';
+
+    const regexFilterInput = document.getElementById('regexFilterInput');
+    if (regexFilterInput) regexFilterInput.value = '';
+
+    const batchDateInput = document.getElementById('batchDateInput');
+    if (batchDateInput) batchDateInput.value = today;
+}
+
 // Initialize
 window.onload = function() {
     loadData();
@@ -1083,18 +1182,16 @@ window.onload = function() {
         versionControl.createVersion([], 'Initial empty state');
     }
 
-    if (appSettings.deleteSoundEnabled) {
-        deleteSoundAudio = new Audio('assets/delete.mp3');
-        deleteSoundAudio.preload = 'auto';
+    if (appSettings.actionSoundEnabled) {
+        deleteActionSoundAudio = new Audio('assets/delete.mp3');
+        deleteActionSoundAudio.preload = 'auto';
+        putActionSoundAudio = new Audio('assets/put.mp3');
+        putActionSoundAudio.preload = 'auto';
     }
 
     renderWords();
-    updateWeightSelection();
+    resetAddAndBatchToolbarInputs();
     updateEditWeightSelection();
-
-    // Set default date to today
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('dateInput').value = today;
 
     // Load voices for speech synthesis — cache for iOS which loads them async
     if ('speechSynthesis' in window) {
@@ -1182,7 +1279,35 @@ window.addEventListener('resize', () => { modeSwitchNaturalTop = null; updatePor
 function toggleMode() {
     modeToggle.classList.toggle('active');
     hideMeaning = !hideMeaning;
+
+    // Preserve scroll position by anchoring to a visible word item
+    const scrollContainer = document.querySelector('.workspace-right');
+    let anchorWord = null;
+    let anchorOffset = 0;
+    if (scrollContainer) {
+        const items = scrollContainer.querySelectorAll('.word-item');
+        const containerTop = scrollContainer.getBoundingClientRect().top;
+        for (const item of items) {
+            const rect = item.getBoundingClientRect();
+            if (rect.bottom > containerTop) {
+                anchorWord = item.getAttribute('data-word');
+                anchorOffset = rect.top - containerTop;
+                break;
+            }
+        }
+    }
+
     renderWords();
+
+    // Restore scroll position to the same word item
+    if (scrollContainer && anchorWord) {
+        const target = scrollContainer.querySelector(`.word-item[data-word="${CSS.escape(anchorWord)}"]`);
+        if (target) {
+            const containerTop = scrollContainer.getBoundingClientRect().top;
+            const targetTop = target.getBoundingClientRect().top;
+            scrollContainer.scrollTop += (targetTop - containerTop) - anchorOffset;
+        }
+    }
 }
 
 modeToggle.addEventListener('click', toggleMode);
@@ -1377,6 +1502,7 @@ function addWord() {
 
     words.push(newWord);
     saveData(false, `＋　${word}`);
+    playActionSound('put');
     renderWords();
     showStatus(`Added "${word}"`, 'success');
 
@@ -1426,7 +1552,7 @@ async function deleteWord(index) {
 
     words.splice(index, 1);
     saveData(false, `－　${wordName}`);
-    playDeleteSound();
+    playActionSound('delete');
     renderWords();
     showStatus('Word deleted', 'success');
 }
@@ -1447,9 +1573,12 @@ function toggleWordSelection(index) {
 
 // Toggle sort mode
 function toggleSortMode() {
-    wordSortMode = wordSortMode === 'alpha' ? 'chrono' : 'alpha';
+    const modes = ['alpha', 'alpha-desc', 'chrono', 'chrono-desc'];
+    const labels = ['A-Z', 'Z-A', 'Date↑', 'Date↓'];
+    const idx = modes.indexOf(wordSortMode);
+    wordSortMode = modes[(idx + 1) % modes.length];
     const btn = document.getElementById('sortModeBtn');
-    if (btn) btn.textContent = wordSortMode === 'alpha' ? 'A-Z' : 'Date';
+    if (btn) btn.textContent = labels[modes.indexOf(wordSortMode)];
     renderWords();
 }
 
@@ -1459,8 +1588,36 @@ function toggleSelectMode() {
     if (!isSelectMode) {
         selectedWords.clear();
     }
+
+    // Preserve scroll position by anchoring to a visible word item
+    const scrollContainer = document.querySelector('.workspace-right');
+    let anchorWord = null;
+    let anchorOffset = 0;
+    if (scrollContainer) {
+        const items = scrollContainer.querySelectorAll('.word-item');
+        const containerTop = scrollContainer.getBoundingClientRect().top;
+        for (const item of items) {
+            const rect = item.getBoundingClientRect();
+            if (rect.bottom > containerTop) {
+                anchorWord = item.getAttribute('data-word');
+                anchorOffset = rect.top - containerTop;
+                break;
+            }
+        }
+    }
+
     renderWords();
     updateBatchToolbar();
+
+    // Restore scroll position to the same word item
+    if (scrollContainer && anchorWord) {
+        const target = scrollContainer.querySelector(`.word-item[data-word="${CSS.escape(anchorWord)}"]`);
+        if (target) {
+            const containerTop = scrollContainer.getBoundingClientRect().top;
+            const targetTop = target.getBoundingClientRect().top;
+            scrollContainer.scrollTop += (targetTop - containerTop) - anchorOffset;
+        }
+    }
 }
 
 // Update batch toolbar and buttons
@@ -1470,6 +1627,7 @@ function updateBatchToolbar() {
     const batchUpBtn = document.getElementById('batchUpBtn');
     const batchDownBtn = document.getElementById('batchDownBtn');
     const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+    const batchSetDateBtn = document.getElementById('batchSetDateBtn');
 
     if (toolbar) {
         toolbar.style.display = isSelectMode ? 'flex' : 'none';
@@ -1486,6 +1644,7 @@ function updateBatchToolbar() {
         batchDeleteBtn.disabled = !hasSelection;
         batchDeleteBtn.textContent = hasSelection ? `Delete (${selectedWords.size})` : 'Delete';
     }
+    if (batchSetDateBtn) batchSetDateBtn.disabled = !hasSelection;
 
     if (isSelectMode) {
         requestAnimationFrame(syncDateInputDisplayMode);
@@ -1736,6 +1895,44 @@ async function batchAdjustWeight(delta) {
     showStatus(`Weight adjusted for ${count} word(s)`, 'success');
 }
 
+// Batch set date
+async function batchSetDate() {
+    if (selectedWords.size === 0) return;
+
+    const dateInput = document.getElementById('batchDateInput');
+    const targetDate = dateInput ? dateInput.value : '';
+    if (!targetDate) {
+        showStatus('Please choose a date', 'error');
+        return;
+    }
+
+    const count = selectedWords.size;
+    const shouldSetDate = await showInPageConfirm({
+        title: 'Set Date',
+        message: `Set added date to ${formatAddedDateLabel(targetDate) || targetDate} for ${count} selected word(s)?`,
+        confirmText: 'Set',
+        cancelText: 'Cancel'
+    });
+    if (!shouldSetDate) return;
+
+    let updatedCount = 0;
+    selectedWords.forEach(index => {
+        if (words[index]) {
+            words[index].added = targetDate;
+            updatedCount++;
+        }
+    });
+
+    if (updatedCount === 0) {
+        showStatus('No words were updated', 'error');
+        return;
+    }
+
+    saveData(false, `Date set to ${targetDate} for ${updatedCount} word(s)`);
+    renderWords();
+    showStatus(`Date updated for ${updatedCount} word(s)`, 'success');
+}
+
 // Update word selection UI
 function updateWordSelectionUI() {
     // Update all checkboxes
@@ -1767,11 +1964,14 @@ async function batchDeleteConfirm() {
     });
     selectedWords.clear();
     saveData(false, `－　${count}`);
-    playDeleteSound();
+    playActionSound('delete');
     renderWords();
     updateBatchToolbar();
     showStatus(`Deleted ${count} word(s)`, 'success');
 }
+
+// Detect iOS (used for pronunciation gesture workaround)
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // Pronunciation — uses preloaded audio cache for instant playback
 function pronounceWord(word) {
@@ -1797,11 +1997,32 @@ function pronounceWord(word) {
         const audio = new Audio(cached.url);
         audio.play().then(() => {
             showStatus(`Playing "${word}"`, 'info');
-        }).catch(() => pronounceFallback(word));
+        }).catch(() => pronounceSpeechSynthesis(word));
         return;
     }
 
-    // If cache failed or not yet loaded, fetch on demand
+    // iOS Safari: speechSynthesis.speak() must be called synchronously within the
+    // user gesture call stack. Fetching audio is async and the .catch() fallback
+    // loses gesture context, so speechSynthesis would silently fail.
+    // On iOS, speak synchronously NOW, then fetch audio in background for next time.
+    if (isIOS) {
+        pronounceSpeechSynthesis(word);
+        // Cache audio in background for future clicks (will hit the cached paths above)
+        fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(word)}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data) return;
+                const audioUrl = data[0]?.phonetics?.find(p => p.audio)?.audio;
+                if (audioUrl) {
+                    if (!audioCache.has(word)) audioCache.set(word, { status: 'ready', url: audioUrl, buffer: null });
+                    else { const e = audioCache.get(word); e.url = audioUrl; e.status = 'ready'; }
+                }
+            })
+            .catch(() => {});
+        return;
+    }
+
+    // Desktop: fetch on demand, fall back to speechSynthesis
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     const audioCtx = AudioCtx ? new AudioCtx() : null;
 
@@ -1842,54 +2063,47 @@ function pronounceWord(word) {
         })
         .catch(() => {
             if (audioCtx) audioCtx.close().catch(() => {});
-            pronounceFallback(word);
+            pronounceSpeechSynthesis(word);
         });
 }
 
-function pronounceFallback(word) {
+// Speech synthesis pronunciation — called synchronously from user gesture on iOS
+function pronounceSpeechSynthesis(word) {
     if (!('speechSynthesis' in window)) {
         showStatus('Pronunciation not supported', 'error');
         return;
     }
 
-    // iOS fix: cancel then delay before speak — immediate speak after cancel silently fails
-    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(word);
+    utterance.lang = 'en-GB';
+    utterance.rate = 0.8;
 
-    const doSpeak = () => {
-        const utterance = new SpeechSynthesisUtterance(word);
-        utterance.lang = 'en-GB';
-        utterance.rate = 0.8;
+    // Use cached voices (populated via voiceschanged), fallback to fresh call
+    const voices = cachedVoices.length > 0 ? cachedVoices : speechSynthesis.getVoices();
+    const britishVoice = voices.find(v =>
+        v.lang.startsWith('en-GB') || v.lang.startsWith('en-UK')
+    );
+    if (britishVoice) utterance.voice = britishVoice;
 
-        // Use cached voices (populated via voiceschanged), fallback to fresh call
-        const voices = cachedVoices.length > 0 ? cachedVoices : speechSynthesis.getVoices();
-        const britishVoice = voices.find(v =>
-            v.lang.startsWith('en-GB') || v.lang.startsWith('en-UK')
-        );
-        if (britishVoice) utterance.voice = britishVoice;
-
-        // iOS Safari bug: speech pauses after ~15s. Keep-alive timer resumes it.
-        let iosResumeTimer = null;
-        utterance.onstart = () => {
-            iosResumeTimer = setInterval(() => {
-                if (speechSynthesis.paused) speechSynthesis.resume();
-            }, 5000);
-        };
-        const cleanup = () => { if (iosResumeTimer) { clearInterval(iosResumeTimer); iosResumeTimer = null; } };
-        utterance.onend = cleanup;
-        utterance.onerror = (e) => {
-            cleanup();
-            // 'interrupted' is normal (user clicked again), only log real errors
-            if (e.error !== 'interrupted') {
-                showStatus('Pronunciation failed', 'error');
-            }
-        };
-
-        speechSynthesis.speak(utterance);
-        showStatus(`Pronouncing "${word}"`, 'info');
+    // iOS Safari bug: speech pauses after ~15s. Keep-alive timer resumes it.
+    let iosResumeTimer = null;
+    utterance.onstart = () => {
+        iosResumeTimer = setInterval(() => {
+            if (speechSynthesis.paused) speechSynthesis.resume();
+        }, 5000);
+    };
+    const cleanup = () => { if (iosResumeTimer) { clearInterval(iosResumeTimer); iosResumeTimer = null; } };
+    utterance.onend = cleanup;
+    utterance.onerror = (e) => {
+        cleanup();
+        // 'interrupted' is normal (user clicked again), only log real errors
+        if (e.error !== 'interrupted') {
+            showStatus('Pronunciation failed', 'error');
+        }
     };
 
-    // iOS needs ~100ms gap after cancel() before speak() will work
-    setTimeout(doSpeak, 100);
+    speechSynthesis.speak(utterance);
+    showStatus(`Pronouncing "${word}"`, 'info');
 }
 
 // Open edit modal
@@ -1911,6 +2125,7 @@ function openEditModal(index) {
     updateEditWeightSelection();
 
     document.getElementById('editModal').classList.add('active');
+    initResponsiveDateInputs();
 }
 
 // Close edit modal
@@ -1986,6 +2201,10 @@ function renderWords() {
     Object.keys(groups).forEach(weight => {
         if (wordSortMode === 'chrono') {
             groups[weight].sort((a, b) => (a.added || '').localeCompare(b.added || ''));
+        } else if (wordSortMode === 'chrono-desc') {
+            groups[weight].sort((a, b) => (b.added || '').localeCompare(a.added || ''));
+        } else if (wordSortMode === 'alpha-desc') {
+            groups[weight].sort((a, b) => b.word.localeCompare(a.word));
         } else {
             groups[weight].sort((a, b) => a.word.localeCompare(b.word));
         }
@@ -2108,8 +2327,9 @@ function loadData() {
 // Export data
 // Export data only (without version history)
 function exportDataOnly() {
+    const projectId = getProjectId();
     const exportObj = {
-        projectId: getProjectId(),
+        projectId,
         words: words
     };
     const dataStr = JSON.stringify(exportObj, null, 2);
@@ -2117,7 +2337,7 @@ function exportDataOnly() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `words-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `wordlist-${toSafeFilenamePart(projectId)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     showStatus('Exported data only', 'success');
@@ -2130,8 +2350,9 @@ function exportWithVersionHistory() {
         return;
     }
 
+    const projectId = getProjectId();
     const exportData = {
-        projectId: getProjectId(),
+        projectId,
         words: words,
         versionHistory: {
             format: 'tree-v1',
@@ -2147,7 +2368,7 @@ function exportWithVersionHistory() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `words-with-history-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `wordlist-${toSafeFilenamePart(projectId)}-full.json`;
     a.click();
     URL.revokeObjectURL(url);
     showStatus('Exported data with version history', 'success');
@@ -2288,32 +2509,51 @@ function importAsOverwrite(wordsData, description) {
     showStatus(`Overwrite imported ${processed.length} words as new branch`, 'success');
 }
 
-// Import data with version history
+// Import data with version history (as fork — grafts imported tree under local root)
 function importWithVersionHistory(importedData) {
-    const { processed, validCount, invalidCount } = processImportedWords(importedData.words);
-    words = processed;
+    const vh = importedData.versionHistory;
+    const importedVersionCount = Object.keys(vh.versions).length;
 
-    // Import version history
-    versionControl.versions = new Map(Object.entries(importedData.versionHistory.versions));
-    versionControl.rootId = importedData.versionHistory.rootId;
-    versionControl.currentId = importedData.versionHistory.currentId;
+    // Graft the imported tree as a new branch under local root
+    const newCurrentId = versionControl.graftTree(vh.versions, vh.rootId, vh.currentId);
+
+    // Switch to the imported current version
+    const currentVersion = versionControl.versions.get(newCurrentId);
+    if (currentVersion && currentVersion.data) {
+        words = JSON.parse(JSON.stringify(currentVersion.data));
+    } else {
+        const { processed } = processImportedWords(importedData.words);
+        words = processed;
+    }
+
+    localStorage.setItem('wordMemoryData', JSON.stringify(words));
+    renderWords();
+
+    showStatus(`Forked: imported ${importedVersionCount} version(s) as new branch`, 'success');
+}
+
+// Import data with version history (replace — clears local history entirely)
+function importReplaceWithVersionHistory(importedData) {
+    const { processed } = processImportedWords(importedData.words);
+    const vh = importedData.versionHistory;
+
+    versionControl.versions = new Map(Object.entries(vh.versions));
+    versionControl.rootId = vh.rootId;
+    versionControl.currentId = vh.currentId;
     versionControl.saveHistory();
 
-    // Switch to current version
     const currentVersion = versionControl.versions.get(versionControl.currentId);
-    if (currentVersion) {
+    if (currentVersion && currentVersion.data) {
         words = JSON.parse(JSON.stringify(currentVersion.data));
+    } else {
+        words = processed;
     }
 
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
     renderWords();
 
     const versionCount = versionControl.versions.size;
-    if (invalidCount > 0) {
-        showStatus(`Imported ${validCount} valid, ${invalidCount} invalid words with ${versionCount} version(s)`, 'success');
-    } else {
-        showStatus(`Imported ${processed.length} words with ${versionCount} version(s)`, 'success');
-    }
+    showStatus(`Replaced: imported ${versionCount} version(s)`, 'success');
 }
 
 function isJsonImportFile(file) {
@@ -2345,12 +2585,6 @@ async function importDataFromFile(file) {
 
     try {
         const imported = JSON.parse(await file.text());
-        const localProjectId = getProjectId();
-        const importedProjectId = imported && typeof imported === 'object'
-            ? imported.projectId || null
-            : null;
-        const isSameProject = importedProjectId && importedProjectId === localProjectId;
-
         // Check if it contains version history
         if (imported && imported.versionHistory) {
             const validation = validateVersionHistory(imported.versionHistory);
@@ -2368,31 +2602,19 @@ async function importDataFromFile(file) {
                 return;
             }
 
-            if (isSameProject) {
-                // Same project: ask overwrite (creates new branch) or full replace
-                const shouldOverwriteSameProject = await showInPageConfirm({
-                    title: 'Same Project Detected',
-                    message: 'Overwrite current data? (imported data will be added as a new branch in version history)',
-                    confirmText: 'Overwrite',
-                    cancelText: 'Cancel'
-                });
-                if (shouldOverwriteSameProject) {
-                    importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
-                }
-            } else {
-                const shouldImportWithHistory = await showInPageConfirm({
-                    title: 'Import With History',
-                    message: `Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`,
-                    confirmText: 'Import',
-                    cancelText: 'Cancel'
-                });
-                if (shouldImportWithHistory) {
-                    importWithVersionHistory(imported);
-                    // Adopt the imported project's ID
-                    if (importedProjectId) {
-                        setProjectId(importedProjectId);
-                    }
-                }
+            const versionCount = Object.keys(imported.versionHistory.versions).length;
+            const choice = await showInPageChoice({
+                title: 'Import With History',
+                message: `${imported.words.length} words, ${versionCount} version(s)`,
+                choices: [
+                    { text: 'Fork', value: 'fork' },
+                    { text: 'Replace', value: 'replace', tone: 'danger' }
+                ]
+            });
+            if (choice === 'fork') {
+                importWithVersionHistory(imported);
+            } else if (choice === 'replace') {
+                importReplaceWithVersionHistory(imported);
             }
         } else if (Array.isArray(imported)) {
             // Old format - words array only
@@ -2406,29 +2628,14 @@ async function importDataFromFile(file) {
                 importWordsOnly(imported);
             }
         } else if (imported && imported.words && Array.isArray(imported.words)) {
-            if (isSameProject) {
-                const shouldOverwriteWordsOnly = await showInPageConfirm({
-                    title: 'Same Project Detected',
-                    message: 'Overwrite current data? (imported data will be added as a new branch in version history)',
-                    confirmText: 'Overwrite',
-                    cancelText: 'Cancel'
-                });
-                if (shouldOverwriteWordsOnly) {
-                    importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
-                }
-            } else {
-                const shouldImportWords = await showInPageConfirm({
-                    title: 'Import Words',
-                    message: `Import ${imported.words.length} words? This will overwrite current data and clear version history.`,
-                    confirmText: 'Import',
-                    cancelText: 'Cancel'
-                });
-                if (shouldImportWords) {
-                    importWordsOnly(imported.words);
-                    if (importedProjectId) {
-                        setProjectId(importedProjectId);
-                    }
-                }
+            const shouldOverwrite = await showInPageConfirm({
+                title: 'Import as Branch',
+                message: `Import ${imported.words.length} words as a new branch in version history?`,
+                confirmText: 'Import',
+                cancelText: 'Cancel'
+            });
+            if (shouldOverwrite) {
+                importAsOverwrite(imported.words, `Import fork (${imported.words.length} words)`);
             }
         } else {
             showStatus('Invalid file format', 'error');
@@ -2612,12 +2819,12 @@ function openSettingsModal() {
     if (!versionControl) return;
 
     const settings = versionControl.getSettings();
-    const deleteSoundEnabledInput = document.getElementById('deleteSoundEnabledInput');
+    const actionSoundEnabledInput = document.getElementById('actionSoundEnabledInput');
     const audioPreloadEnabledInput = document.getElementById('audioPreloadEnabledInput');
     document.getElementById('maxVersionsInput').value = settings.maxVersions;
     document.getElementById('projectIdInput').value = getProjectId();
-    if (deleteSoundEnabledInput) {
-        deleteSoundEnabledInput.checked = appSettings.deleteSoundEnabled;
+    if (actionSoundEnabledInput) {
+        actionSoundEnabledInput.checked = appSettings.actionSoundEnabled;
     }
     if (audioPreloadEnabledInput) {
         audioPreloadEnabledInput.checked = appSettings.audioPreloadEnabled;
@@ -2634,10 +2841,10 @@ function saveSettings() {
 
     const maxVersions = parseInt(document.getElementById('maxVersionsInput').value, 10);
     const projectIdInput = document.getElementById('projectIdInput');
-    const deleteSoundEnabledInput = document.getElementById('deleteSoundEnabledInput');
+    const actionSoundEnabledInput = document.getElementById('actionSoundEnabledInput');
     const audioPreloadEnabledInput = document.getElementById('audioPreloadEnabledInput');
     const projectId = projectIdInput ? projectIdInput.value.trim() : '';
-    const nextDeleteSoundEnabled = deleteSoundEnabledInput ? deleteSoundEnabledInput.checked : DEFAULT_APP_SETTINGS.deleteSoundEnabled;
+    const nextActionSoundEnabled = actionSoundEnabledInput ? actionSoundEnabledInput.checked : DEFAULT_APP_SETTINGS.actionSoundEnabled;
     const nextAudioPreloadEnabled = audioPreloadEnabledInput ? audioPreloadEnabledInput.checked : DEFAULT_APP_SETTINGS.audioPreloadEnabled;
 
     if (isNaN(maxVersions) || maxVersions < 10 || maxVersions > 200) {
@@ -2662,21 +2869,78 @@ function saveSettings() {
     }
 
     appSettings = sanitizeAppSettings({
-        deleteSoundEnabled: nextDeleteSoundEnabled,
+        actionSoundEnabled: nextActionSoundEnabled,
         audioPreloadEnabled: nextAudioPreloadEnabled
     });
     saveAppSettings();
     applyAudioPreloadSetting();
 
-    if (!appSettings.deleteSoundEnabled) {
-        deleteSoundAudio = null;
-    } else if (!deleteSoundAudio) {
-        deleteSoundAudio = new Audio('assets/delete.mp3');
-        deleteSoundAudio.preload = 'auto';
+    if (!appSettings.actionSoundEnabled) {
+        deleteActionSoundAudio = null;
+        putActionSoundAudio = null;
+    } else {
+        if (!deleteActionSoundAudio) {
+            deleteActionSoundAudio = new Audio('assets/delete.mp3');
+            deleteActionSoundAudio.preload = 'auto';
+        }
+        if (!putActionSoundAudio) {
+            putActionSoundAudio = new Audio('assets/put.mp3');
+            putActionSoundAudio.preload = 'auto';
+        }
     }
 
     showStatus('Settings saved', 'success');
     closeSettingsModal();
+}
+
+async function clearAllData() {
+    const choice = await showInPageChoice({
+        title: 'Clear All Data',
+        message: 'This will permanently delete all words, version history, settings, and cached data. This cannot be undone.',
+        choices: [
+            { text: 'Export Fully', value: 'export' },
+            { text: 'Clear All', value: 'clear', tone: 'danger' }
+        ]
+    });
+    if (choice === 'export') {
+        exportWithVersionHistory();
+        return;
+    }
+    if (choice !== 'clear') return;
+
+    // Clear localStorage
+    localStorage.clear();
+
+    // Clear sessionStorage
+    sessionStorage.clear();
+
+    // Clear cookies
+    document.cookie.split(';').forEach(cookie => {
+        const name = cookie.split('=')[0].trim();
+        if (name) {
+            document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+        }
+    });
+
+    // Clear caches (Cache API)
+    if ('caches' in window) {
+        try {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(key => caches.delete(key)));
+        } catch (e) {}
+    }
+
+    // Reset in-memory state
+    words = [];
+    if (versionControl) {
+        versionControl.versions = new Map();
+        versionControl.rootId = null;
+        versionControl.currentId = null;
+    }
+
+    closeSettingsModal();
+    renderWords();
+    showStatus('All data cleared', 'success');
 }
 
 function generateProjectIdForSettings() {
@@ -2886,6 +3150,68 @@ function showInPageConfirm({
         _confirmModalResolver = resolve;
         modal.classList.add('active');
         requestAnimationFrame(() => confirmBtn.focus({ preventScroll: true }));
+    });
+}
+
+// Show a modal with multiple choice buttons. Returns the chosen value string, or null if cancelled.
+function showInPageChoice({
+    title = 'Choose',
+    message = '',
+    choices = [],  // [{ text: 'Fork', value: 'fork', tone: 'default' }, ...]
+    cancelText = 'Cancel'
+} = {}) {
+    const modal = document.getElementById('confirmModal');
+    const titleEl = document.getElementById('confirmModalTitle');
+    const messageEl = document.getElementById('confirmModalMessage');
+    const actionsEl = modal ? modal.querySelector('.modal-actions') : null;
+
+    if (!modal || !titleEl || !messageEl || !actionsEl) {
+        return Promise.resolve(null);
+    }
+
+    if (_confirmModalResolver) {
+        _confirmModalResolver(null);
+        _confirmModalResolver = null;
+    }
+
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+
+    // Replace action buttons
+    actionsEl.innerHTML = '';
+    choices.forEach(choice => {
+        const btn = document.createElement('button');
+        btn.className = choice.tone === 'danger' ? 'btn-primary is-danger' : 'btn-primary';
+        btn.textContent = choice.text;
+        btn.addEventListener('click', () => resolveInPageConfirm(choice.value));
+        actionsEl.appendChild(btn);
+    });
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = cancelText;
+    cancelBtn.addEventListener('click', () => resolveInPageConfirm(null));
+    actionsEl.appendChild(cancelBtn);
+
+    return new Promise((resolve) => {
+        _confirmModalResolver = resolve;
+        modal.classList.add('active');
+        const firstBtn = actionsEl.querySelector('button');
+        if (firstBtn) requestAnimationFrame(() => firstBtn.focus({ preventScroll: true }));
+    }).finally(() => {
+        // Restore original confirm/cancel buttons for showInPageConfirm
+        actionsEl.innerHTML = '';
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'btn-primary';
+        confirmBtn.id = 'confirmModalConfirmBtn';
+        confirmBtn.textContent = 'Confirm';
+        confirmBtn.addEventListener('click', () => resolveInPageConfirm(true));
+        const cancelBtnRestore = document.createElement('button');
+        cancelBtnRestore.className = 'btn-secondary';
+        cancelBtnRestore.id = 'confirmModalCancelBtn';
+        cancelBtnRestore.textContent = 'Cancel';
+        cancelBtnRestore.addEventListener('click', () => resolveInPageConfirm(false));
+        actionsEl.appendChild(confirmBtn);
+        actionsEl.appendChild(cancelBtnRestore);
     });
 }
 
@@ -3217,7 +3543,7 @@ async function deleteSelectedVersions() {
     updateRegistryStatus();
     updateRegistryAddressBar();
     updateRegistryToolbarButtons();
-    playDeleteSound();
+    playActionSound('delete');
 
     if (hadRootSelected) {
         showStatus(`Deleted ${selectedCount} version(s). Root version was skipped.`, 'success');
