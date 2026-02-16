@@ -753,22 +753,27 @@ button:disabled {
 	inset: 0;
 	display: flex;
 	align-items: center;
-	justify-content: center;
+	padding: 4px 6px;
+	font-size: 12px;
+	line-height: 1.2;
 	font-weight: 500;
-	font-family: inherit;
 	color: var(--color-text);
 	letter-spacing: -0.02em;
-	line-height: 1;
 	pointer-events: none;
 	opacity: 0;
 	white-space: nowrap;
 	z-index: 1;
-	margin: 0;
+	text-align: left;
+}
+
+.add-form .range-input-date-compact-label {
+	padding: var(--space-sm) var(--space-md);
+	font-size: 14px;
+	letter-spacing: 0;
 }
 
 .range-input-date-compact-label.active {
 	opacity: 1;
-	height: 100%;
 }
 
 .range-input-date.date-icon-only,
