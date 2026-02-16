@@ -48,7 +48,7 @@
                             <label>POS</label>
                             <div class="dropdown-container pos-selector" id="posSelector">
                                 <div class="dropdown-selected pos-selected" id="posSelected">
-                                    <span class="pos-placeholder">Select...</span>
+                                    <span class="pos-placeholder">▽</span>
                                 </div>
                                 <div class="dropdown-menu pos-dropdown" id="posDropdown">
                                     <label class="dropdown-option pos-option" data-value="n" onclick="togglePosOption(this, event)">n.</label>
@@ -187,7 +187,7 @@
                     <label>POS</label>
                     <div class="dropdown-container pos-selector" id="editPosSelector">
                         <div class="dropdown-selected pos-selected" id="editPosSelected">
-                            <span class="pos-placeholder">Select...</span>
+                            <span class="pos-placeholder">▽</span>
                         </div>
                         <div class="dropdown-menu pos-dropdown" id="editPosDropdown">
                             <label class="dropdown-option pos-option" data-value="n" onclick="toggleEditPosOption(this, event)">n.</label>
@@ -241,6 +241,14 @@
             </div>
 
             <div class="form-row">
+                <label>Profile ID</label>
+                <input type="text" id="projectIdInput" autocomplete="off" spellcheck="false">
+                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                    <button class="btn-secondary" onclick="generateProjectIdForSettings()" style="margin-top: 0;">Generate New ID</button>
+                </div>
+            </div>
+
+            <div class="form-row">
                 <label>Export Options</label>
                 <div style="display: flex; gap: 8px;">
                     <button class="btn-secondary" onclick="exportDataOnly()" style="margin-top: 0;">Data Only</button>
@@ -256,6 +264,18 @@
             <div class="modal-actions">
                 <button class="btn-primary" onclick="saveSettings()">Save</button>
                 <button class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirmModal" class="modal modal-confirm">
+        <div class="modal-content confirm-modal-content">
+            <div class="modal-header" id="confirmModalTitle">Confirm</div>
+            <div id="confirmModalMessage" class="confirm-modal-message"></div>
+            <div class="modal-actions">
+                <button class="btn-primary" id="confirmModalConfirmBtn">Confirm</button>
+                <button class="btn-secondary" id="confirmModalCancelBtn">Cancel</button>
             </div>
         </div>
     </div>
@@ -298,7 +318,7 @@
                         <button class="registry-tab active" data-mode="version" onclick="switchPreviewMode('version')">Version</button>
                         <button class="registry-tab" data-mode="diff" onclick="switchPreviewMode('diff')">Diff</button>
                     </div>
-                    <div id="registryPreview" class="registry-preview">
+                    <div id="registryPreview" class="registry-preview" tabindex="0">
                         <div class="registry-preview-empty">Select a version to preview</div>
                     </div>
                 </div>

@@ -26,7 +26,6 @@ class VersionControl {
 
                 if (Array.isArray(parsed)) {
                     // Old linear format - migrate to tree structure
-                    console.log('Migrating from linear to tree structure...');
                     this.migrateFromLinear(parsed);
                 } else {
                     // New tree format
@@ -45,7 +44,6 @@ class VersionControl {
                 this.maxVersions = settings.maxVersions || 100;
             }
         } catch (error) {
-            console.error('Failed to load version history:', error);
             this.versions = new Map();
             this.rootId = null;
             this.currentId = null;
@@ -94,7 +92,6 @@ class VersionControl {
 
         // Save migrated data
         this.saveHistory();
-        console.log(`Migrated ${linearVersions.length} versions to tree structure`);
     }
 
     // Save version history to localStorage
@@ -111,7 +108,6 @@ class VersionControl {
             };
             localStorage.setItem('wordMemoryVersionMeta', JSON.stringify(meta));
         } catch (error) {
-            console.error('Failed to save version history:', error);
             // If localStorage is full, try to remove old versions
             if (error.name === 'QuotaExceededError') {
                 const toRemove = Math.max(10, Math.floor(this.maxVersions / 4));
@@ -122,7 +118,6 @@ class VersionControl {
                     const meta = { rootId: this.rootId, currentId: this.currentId };
                     localStorage.setItem('wordMemoryVersionMeta', JSON.stringify(meta));
                 } catch (e) {
-                    console.error('Still failed after removing old versions:', e);
                 }
             }
         }
@@ -275,6 +270,35 @@ class VersionControl {
         this.versions.delete(versionId);
     }
 
+    // Delete only this version and reparent its children to its parent
+    deleteVersionAndReparentChildren(versionId) {
+        const version = this.versions.get(versionId);
+        if (!version) return;
+        if (versionId === this.rootId) return;
+
+        const parentId = version.parentId;
+        const parent = parentId ? this.versions.get(parentId) : null;
+        const versionChildren = Array.isArray(version.children) ? version.children : [];
+        const childrenToReparent = [...versionChildren];
+
+        // Reattach children in place of the deleted node to preserve branch order.
+        if (parent) {
+            const parentChildren = Array.isArray(parent.children) ? parent.children : [];
+            const at = parentChildren.indexOf(versionId);
+            parent.children = parentChildren.filter(id => id !== versionId);
+            const insertAt = at >= 0 ? at : parent.children.length;
+            parent.children.splice(insertAt, 0, ...childrenToReparent);
+        }
+
+        for (const childId of childrenToReparent) {
+            const child = this.versions.get(childId);
+            if (child) child.parentId = parentId || null;
+        }
+
+        version.children = [];
+        this.versions.delete(versionId);
+    }
+
     // Prune old versions (keep recently accessed, protect current path)
     pruneOldVersions(forceRemove = 0) {
         const targetSize = forceRemove > 0 ? this.versions.size - forceRemove : this.maxVersions;
@@ -391,11 +415,22 @@ class VersionControl {
 // Project ID
 const PROJECT_ID_KEY = 'wordMemoryProjectId';
 
+function createProjectId() {
+    return crypto.randomUUID
+        ? crypto.randomUUID()
+        : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+}
+
+function setProjectId(id) {
+    const normalizedId = String(id || '').trim();
+    localStorage.setItem(PROJECT_ID_KEY, normalizedId);
+    return normalizedId;
+}
+
 function getProjectId() {
     let id = localStorage.getItem(PROJECT_ID_KEY);
     if (!id) {
-        id = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
-        localStorage.setItem(PROJECT_ID_KEY, id);
+        id = setProjectId(createProjectId());
     }
     return id;
 }
@@ -414,11 +449,9 @@ const SPEAKER_ICON_SVG = '<svg class="icon-speaker" viewBox="0 0 24 24" aria-hid
 const DATE_INPUT_ICON_ONLY_THRESHOLD = 120;
 let dateInputResizeObserver = null;
 const LAYOUT_BREAKPOINT_QUERY = '(min-width: 768px)';
-const LAYOUT_DESKTOP_POINTER_QUERY = '(hover: hover) and (pointer: fine)';
 const LAYOUT_SPLIT_STORAGE_KEY = 'wordMemoryLayoutSplitRatio';
 const LAYOUT_MIN_PANEL_WIDTH = 320;
 const LAYOUT_KEYBOARD_STEP = 0.02;
-const LAYOUT_DEFAULT_HANDLE_HEIGHT = 20;
 let layoutSplitRatio = 0.5;
 
 // Dropdown Base Class
@@ -431,7 +464,6 @@ class Dropdown {
 
         // Check if all elements exist
         if (!this.container || !this.selected || !this.dropdown) {
-            console.warn(`Dropdown initialization failed: ${containerId}, ${selectedId}, ${dropdownId}`);
             return;
         }
 
@@ -703,7 +735,6 @@ function saveLayoutSplitRatio(ratio) {
     try {
         localStorage.setItem(LAYOUT_SPLIT_STORAGE_KEY, String(clampLayoutValue(ratio, 0, 1)));
     } catch (error) {
-        console.warn('Failed to save layout split ratio:', error);
     }
 }
 
@@ -734,39 +765,6 @@ function setLayoutSplitRatio(layout, divider, ratio) {
     divider.setAttribute('aria-valuenow', String(Math.round(normalizedRatio * 100)));
 }
 
-function getLayoutDividerHandleHeight(divider) {
-    if (!divider) return LAYOUT_DEFAULT_HANDLE_HEIGHT;
-
-    const raw = window.getComputedStyle(divider).getPropertyValue('--layout-divider-handle-height');
-    const parsed = Number.parseFloat(raw);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-        return LAYOUT_DEFAULT_HANDLE_HEIGHT;
-    }
-    return parsed;
-}
-
-function setLayoutDividerHandleFromClientY(divider, clientY) {
-    if (!divider) return;
-
-    const rect = divider.getBoundingClientRect();
-    const handleHeight = getLayoutDividerHandleHeight(divider);
-    const maxTop = Math.max(0, rect.height - handleHeight);
-    const targetTop = clientY - rect.top - (handleHeight / 2);
-    const clampedTop = clampLayoutValue(targetTop, 0, maxTop);
-    divider.style.setProperty('--layout-divider-handle-top', `${clampedTop}px`);
-}
-
-function syncLayoutDividerHandlePosition(divider, isWideLayout) {
-    if (!divider) return;
-
-    if (!isWideLayout) {
-        divider.style.removeProperty('--layout-divider-handle-top');
-        return;
-    }
-
-    setLayoutDividerHandleFromClientY(divider, window.innerHeight / 2);
-}
-
 function initResizableLayout() {
     const layout = document.getElementById('workspaceLayout');
     const divider = document.getElementById('layoutDivider');
@@ -774,20 +772,17 @@ function initResizableLayout() {
 
     layoutSplitRatio = loadLayoutSplitRatio();
     const mediaQuery = window.matchMedia(LAYOUT_BREAKPOINT_QUERY);
-    const desktopPointerQuery = window.matchMedia(LAYOUT_DESKTOP_POINTER_QUERY);
     let isResizing = false;
 
     const applyLayout = () => {
         if (!mediaQuery.matches) {
             layout.style.removeProperty('--workspace-left-width');
             divider.setAttribute('aria-valuenow', String(Math.round(layoutSplitRatio * 100)));
-            syncLayoutDividerHandlePosition(divider, false);
             return;
         }
 
         setLayoutSplitRatio(layout, divider, layoutSplitRatio);
         syncDateInputDisplayMode();
-        syncLayoutDividerHandlePosition(divider, true);
     };
 
     const handlePointerMove = (event) => {
@@ -811,7 +806,6 @@ function initResizableLayout() {
         divider.classList.remove('is-dragging');
         document.body.classList.remove('is-resizing-layout');
         saveLayoutSplitRatio(layoutSplitRatio);
-        syncLayoutDividerHandlePosition(divider, mediaQuery.matches);
         window.removeEventListener('pointermove', handlePointerMove);
         window.removeEventListener('pointerup', stopResize);
         window.removeEventListener('pointercancel', stopResize);
@@ -824,7 +818,6 @@ function initResizableLayout() {
         isResizing = true;
         divider.classList.add('is-dragging');
         document.body.classList.add('is-resizing-layout');
-        setLayoutDividerHandleFromClientY(divider, event.clientY);
 
         if (typeof divider.setPointerCapture === 'function') {
             try {
@@ -851,27 +844,6 @@ function initResizableLayout() {
         setLayoutSplitRatio(layout, divider, layoutSplitRatio + delta);
         saveLayoutSplitRatio(layoutSplitRatio);
         syncDateInputDisplayMode();
-        syncLayoutDividerHandlePosition(divider, true);
-    });
-
-    let isDividerHovered = false;
-
-    const followPointerYInDivider = (event) => {
-        if (!mediaQuery.matches || !desktopPointerQuery.matches || isResizing) return;
-        if (event.pointerType && event.pointerType !== 'mouse') return;
-        setLayoutDividerHandleFromClientY(divider, event.clientY);
-    };
-
-    divider.addEventListener('pointerenter', (event) => {
-        isDividerHovered = true;
-        followPointerYInDivider(event);
-    });
-    divider.addEventListener('pointermove', followPointerYInDivider);
-    divider.addEventListener('pointerleave', () => {
-        isDividerHovered = false;
-        if (!isResizing) {
-            divider.style.removeProperty('--layout-divider-handle-top');
-        }
     });
 
     divider.addEventListener('dblclick', (event) => {
@@ -880,15 +852,9 @@ function initResizableLayout() {
         setLayoutSplitRatio(layout, divider, 0.5);
         saveLayoutSplitRatio(0.5);
         syncDateInputDisplayMode();
-        syncLayoutDividerHandlePosition(divider, mediaQuery.matches);
     });
 
     window.addEventListener('resize', applyLayout);
-    window.addEventListener('scroll', () => {
-        if (isDividerHovered) {
-            syncLayoutDividerHandlePosition(divider, mediaQuery.matches);
-        }
-    }, { passive: true });
     if (typeof mediaQuery.addEventListener === 'function') {
         mediaQuery.addEventListener('change', applyLayout);
     } else if (typeof mediaQuery.addListener === 'function') {
@@ -896,6 +862,48 @@ function initResizableLayout() {
     }
 
     applyLayout();
+}
+
+function selectRegistryPreviewContent() {
+    const preview = document.getElementById('registryPreview');
+    if (!preview) return false;
+
+    const selectableNodes = preview.querySelectorAll('.json-line, .diff-header, .registry-preview-empty');
+    if (!selectableNodes.length) return false;
+
+    const selection = window.getSelection();
+    if (!selection) return false;
+
+    const firstNode = selectableNodes[0];
+    const lastNode = selectableNodes[selectableNodes.length - 1];
+    const range = document.createRange();
+    range.setStart(firstNode, 0);
+    range.setEnd(lastNode, lastNode.childNodes.length);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+}
+
+function shouldHandleRegistryPreviewSelectAll(event, isInputFocused) {
+    if (isInputFocused) return false;
+    if (!(event.metaKey || event.ctrlKey)) return false;
+    if (event.altKey || event.shiftKey) return false;
+    if (event.key.toLowerCase() !== 'a') return false;
+
+    const historyModal = document.getElementById('historyModal');
+    const preview = document.getElementById('registryPreview');
+    if (!historyModal || !preview || !historyModal.classList.contains('active')) {
+        return false;
+    }
+
+    const targetNode = event.target instanceof Node ? event.target : null;
+    if (targetNode && preview.contains(targetNode)) {
+        return true;
+    }
+
+    const selection = window.getSelection();
+    const anchorNode = selection ? selection.anchorNode : null;
+    return Boolean(anchorNode && preview.contains(anchorNode));
 }
 
 // Initialize
@@ -943,10 +951,64 @@ window.onload = function() {
     updateBatchToolbar();
     initResponsiveDateInputs();
     initResizableLayout();
+    updatePortraitModeSwitchTop();
 };
 
 // Mode toggle
 const modeToggle = document.getElementById('modeToggle');
+const modeSwitch = document.querySelector('.mode-switch');
+const pageTitle = document.querySelector('h1');
+
+let modeSwitchPlaceholder = null;
+let modeSwitchNaturalTop = null;
+
+function measureModeSwitchNaturalTop() {
+    if (!modeSwitch) return;
+    const wasFixed = modeSwitch.classList.contains('is-fixed');
+    if (wasFixed) {
+        modeSwitch.classList.remove('is-fixed');
+        if (modeSwitchPlaceholder) modeSwitchPlaceholder.style.display = 'none';
+    }
+    modeSwitchNaturalTop = modeSwitch.getBoundingClientRect().top + window.scrollY;
+    if (wasFixed) {
+        modeSwitch.classList.add('is-fixed');
+        if (modeSwitchPlaceholder) modeSwitchPlaceholder.style.display = '';
+    }
+}
+
+function updatePortraitModeSwitchTop() {
+    if (!modeSwitch || !pageTitle) return;
+
+    if (!window.matchMedia('(orientation: portrait)').matches) {
+        modeSwitch.classList.remove('is-fixed');
+        if (modeSwitchPlaceholder) modeSwitchPlaceholder.style.display = 'none';
+        modeSwitchNaturalTop = null;
+        return;
+    }
+
+    if (modeSwitchNaturalTop === null) measureModeSwitchNaturalTop();
+
+    if (window.scrollY >= modeSwitchNaturalTop) {
+        if (!modeSwitch.classList.contains('is-fixed')) {
+            // Create placeholder to prevent layout shift
+            if (!modeSwitchPlaceholder) {
+                modeSwitchPlaceholder = document.createElement('div');
+                modeSwitch.parentNode.insertBefore(modeSwitchPlaceholder, modeSwitch.nextSibling);
+            }
+            modeSwitchPlaceholder.style.height = modeSwitch.offsetHeight + 'px';
+            modeSwitchPlaceholder.style.display = '';
+            modeSwitch.classList.add('is-fixed');
+        }
+    } else {
+        if (modeSwitch.classList.contains('is-fixed')) {
+            modeSwitch.classList.remove('is-fixed');
+            if (modeSwitchPlaceholder) modeSwitchPlaceholder.style.display = 'none';
+        }
+    }
+}
+
+window.addEventListener('scroll', updatePortraitModeSwitchTop, { passive: true });
+window.addEventListener('resize', () => { modeSwitchNaturalTop = null; updatePortraitModeSwitchTop(); });
 
 function toggleMode() {
     modeToggle.classList.toggle('active');
@@ -983,7 +1045,7 @@ function togglePosDropdown() {
 function renderPosSelection(containerId, values) {
     const container = document.getElementById(containerId);
     if (values.length === 0) {
-        container.innerHTML = '<span class="pos-placeholder">Select...</span>';
+        container.innerHTML = '<span class="pos-placeholder">▽</span>';
     } else {
         container.innerHTML = values.map(p => `<span class="pos-tag">${p}</span>`).join('');
     }
@@ -1145,7 +1207,7 @@ function addWord() {
     };
 
     words.push(newWord);
-    saveData(false, `Added word "${word}"`);
+    saveData(false, `＋　${word}`);
     renderWords();
     showStatus(`Added "${word}"`, 'success');
 
@@ -1154,11 +1216,6 @@ function addWord() {
     document.getElementById('meaningInput').value = '';
     selectedPos = [];
     updatePosSelection();
-    selectedWeight = 3;
-    updateWeightSelection();
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('dateInput').value = today;
-    syncDateInputDisplayMode();
 }
 
 // Update weight
@@ -1169,7 +1226,7 @@ function updateWeight(index, delta) {
     // If current weight is -3 (invalid), delta is the new weight directly
     if (currentWeight === -3) {
         words[index].weight = delta;
-        saveData(false, `Fixed weight for "${wordName}"`);
+        saveData(false, `＃　${wordName}`);
         renderWords();
         showStatus(`Fixed weight to ${delta}`, 'success');
         return;
@@ -1182,19 +1239,25 @@ function updateWeight(index, delta) {
     }
 
     words[index].weight = newWeight;
-    saveData(false, `Updated weight for "${wordName}"`);
+    saveData(false, `＃　${wordName}`);
     renderWords();
 }
 
 // Delete word
-function deleteWord(index) {
+async function deleteWord(index) {
     const wordName = words[index].word;
-    if (confirm(`Delete "${wordName}"?`)) {
-        words.splice(index, 1);
-        saveData(false, `Deleted word "${wordName}"`);
-        renderWords();
-        showStatus('Word deleted', 'success');
-    }
+    const shouldDelete = await showInPageConfirm({
+        title: 'Delete Word',
+        message: `Delete "${wordName}"?`,
+        confirmText: 'Delete',
+        cancelText: 'Cancel'
+    });
+    if (!shouldDelete) return;
+
+    words.splice(index, 1);
+    saveData(false, `－　${wordName}`);
+    renderWords();
+    showStatus('Word deleted', 'success');
 }
 
 // Toggle word selection
@@ -1473,27 +1536,33 @@ function deselectByRegex() {
 }
 
 // Batch adjust weight
-function batchAdjustWeight(delta) {
+async function batchAdjustWeight(delta) {
     if (selectedWords.size === 0) return;
 
     const count = selectedWords.size;
     const action = delta > 0 ? 'increased' : 'decreased';
 
-    if (confirm(`${delta > 0 ? 'increase' : 'decrease'} weight for ${count} selected word(s)?`)) {
-        selectedWords.forEach(index => {
-            const currentWeight = words[index].weight;
-            const newWeight = currentWeight + delta;
+    const shouldAdjust = await showInPageConfirm({
+        title: 'Adjust Weight',
+        message: `${delta > 0 ? 'Increase' : 'Decrease'} weight for ${count} selected word(s)?`,
+        confirmText: 'Confirm',
+        cancelText: 'Cancel'
+    });
+    if (!shouldAdjust) return;
 
-            // Don't go below -2 or above 10
-            if (newWeight >= -2 && newWeight <= 10) {
-                words[index].weight = newWeight;
-            }
-        });
+    selectedWords.forEach(index => {
+        const currentWeight = words[index].weight;
+        const newWeight = currentWeight + delta;
 
-        saveData(false, `Weight ${action} for ${count} word(s)`);
-        renderWords();
-        showStatus(`Weight adjusted for ${count} word(s)`, 'success');
-    }
+        // Don't go below -2 or above 10
+        if (newWeight >= -2 && newWeight <= 10) {
+            words[index].weight = newWeight;
+        }
+    });
+
+    saveData(false, `Weight ${action} for ${count} word(s)`);
+    renderWords();
+    showStatus(`Weight adjusted for ${count} word(s)`, 'success');
 }
 
 // Update word selection UI
@@ -1508,64 +1577,84 @@ function updateWordSelectionUI() {
 }
 
 // Batch delete confirm
-function batchDeleteConfirm() {
+async function batchDeleteConfirm() {
     if (selectedWords.size === 0) return;
 
     const count = selectedWords.size;
-    if (confirm(`Delete ${count} selected word(s)?`)) {
-        const indicesToDelete = Array.from(selectedWords).sort((a, b) => b - a);
-        indicesToDelete.forEach(index => {
-            words.splice(index, 1);
-        });
-        selectedWords.clear();
-        saveData(false, `Deleted ${count} word(s)`);
-        renderWords();
-        updateBatchToolbar();
-        showStatus(`Deleted ${count} word(s)`, 'success');
-    }
+    const shouldDelete = await showInPageConfirm({
+        title: 'Delete Words',
+        message: `Delete ${count} selected word(s)?`,
+        confirmText: 'Delete',
+        cancelText: 'Cancel'
+    });
+    if (!shouldDelete) return;
+
+    const indicesToDelete = Array.from(selectedWords).sort((a, b) => b - a);
+    indicesToDelete.forEach(index => {
+        words.splice(index, 1);
+    });
+    selectedWords.clear();
+    saveData(false, `－　${count}`);
+    renderWords();
+    updateBatchToolbar();
+    showStatus(`Deleted ${count} word(s)`, 'success');
 }
 
 // Pronunciation
-async function pronounceWord(word) {
-    try {
-        // Try Free Dictionary API first for better quality
-        const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${word}`);
-        if (response.ok) {
-            const data = await response.json();
+function pronounceWord(word) {
+    // Create AudioContext in user gesture context — stays unlocked on iOS Safari
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = AudioCtx ? new AudioCtx() : null;
+
+    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${word}`)
+        .then(response => {
+            if (!response.ok) throw new Error('API failed');
+            return response.json();
+        })
+        .then(data => {
             const audioUrl = data[0]?.phonetics?.find(p => p.audio)?.audio;
+            if (!audioUrl) throw new Error('No audio URL');
 
-            if (audioUrl) {
+            if (audioCtx) {
+                // Play via AudioContext for iOS compatibility
+                return fetch(audioUrl)
+                    .then(r => r.arrayBuffer())
+                    .then(buf => audioCtx.decodeAudioData(buf))
+                    .then(decoded => {
+                        const source = audioCtx.createBufferSource();
+                        source.buffer = decoded;
+                        source.connect(audioCtx.destination);
+                        source.start(0);
+                        source.onended = () => audioCtx.close();
+                        showStatus(`Playing "${word}"`, 'info');
+                    });
+            } else {
                 const audio = new Audio(audioUrl);
-                audio.play();
-                showStatus(`Playing "${word}"`, 'info');
-                return;
+                return audio.play().then(() => {
+                    showStatus(`Playing "${word}"`, 'info');
+                });
             }
-        }
-    } catch (error) {
-        console.log('Dictionary API failed, using Web Speech API');
-    }
-
-    // Fallback to Web Speech API with British English
-    if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(word);
-        utterance.lang = 'en-GB'; // British English
-        utterance.rate = 0.8; // Slightly slower for clarity
-
-        // Try to find a British English voice
-        const voices = speechSynthesis.getVoices();
-        const britishVoice = voices.find(voice =>
-            voice.lang.startsWith('en-GB') || voice.lang.startsWith('en-UK')
-        );
-
-        if (britishVoice) {
-            utterance.voice = britishVoice;
-        }
-
-        speechSynthesis.speak(utterance);
-        showStatus(`Pronouncing "${word}"`, 'info');
-    } else {
-        showStatus('Pronunciation not supported', 'error');
-    }
+        })
+        .catch(() => {
+            if (audioCtx) audioCtx.close().catch(() => {});
+            // Fallback to Web Speech API with British English
+            if ('speechSynthesis' in window) {
+                // iOS fix: cancel pending speech to avoid idle bug
+                speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(word);
+                utterance.lang = 'en-GB';
+                utterance.rate = 0.8;
+                const voices = speechSynthesis.getVoices();
+                const britishVoice = voices.find(voice =>
+                    voice.lang.startsWith('en-GB') || voice.lang.startsWith('en-UK')
+                );
+                if (britishVoice) utterance.voice = britishVoice;
+                speechSynthesis.speak(utterance);
+                showStatus(`Pronouncing "${word}"`, 'info');
+            } else {
+                showStatus('Pronunciation not supported', 'error');
+            }
+        });
 }
 
 // Open edit modal
@@ -1619,7 +1708,7 @@ function saveEdit() {
         added: date
     };
 
-    saveData(false, `Edited word "${oldWord}"`);
+    saveData(false, `✎　${oldWord}`);
     renderWords();
     closeEditModal();
 }
@@ -1996,7 +2085,7 @@ function importData(event) {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         try {
             const imported = JSON.parse(e.target.result);
             const localProjectId = getProjectId();
@@ -2008,7 +2097,13 @@ function importData(event) {
                 const validation = validateVersionHistory(imported.versionHistory);
 
                 if (!validation.valid) {
-                    if (confirm(`Version history is corrupted: ${validation.error}\n\nContinue importing data only (version history will be cleared)?`)) {
+                    const shouldContinueImport = await showInPageConfirm({
+                        title: 'Version History Corrupted',
+                        message: `Version history is corrupted: ${validation.error}\n\nContinue importing data only (version history will be cleared)?`,
+                        confirmText: 'Continue',
+                        cancelText: 'Cancel'
+                    });
+                    if (shouldContinueImport) {
                         importWordsOnly(imported.words || imported);
                     }
                     event.target.value = '';
@@ -2017,33 +2112,63 @@ function importData(event) {
 
                 if (isSameProject) {
                     // Same project: ask overwrite (creates new branch) or full replace
-                    if (confirm(`Same project detected.\nOverwrite current data? (imported data will be added as a new branch in version history)`)) {
+                    const shouldOverwriteSameProject = await showInPageConfirm({
+                        title: 'Same Project Detected',
+                        message: 'Overwrite current data? (imported data will be added as a new branch in version history)',
+                        confirmText: 'Overwrite',
+                        cancelText: 'Cancel'
+                    });
+                    if (shouldOverwriteSameProject) {
                         importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
                     }
                 } else {
-                    if (confirm(`Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`)) {
+                    const shouldImportWithHistory = await showInPageConfirm({
+                        title: 'Import With History',
+                        message: `Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`,
+                        confirmText: 'Import',
+                        cancelText: 'Cancel'
+                    });
+                    if (shouldImportWithHistory) {
                         importWithVersionHistory(imported);
                         // Adopt the imported project's ID
                         if (importedProjectId) {
-                            localStorage.setItem(PROJECT_ID_KEY, importedProjectId);
+                            setProjectId(importedProjectId);
                         }
                     }
                 }
             } else if (Array.isArray(imported)) {
                 // Old format - words array only
-                if (confirm(`Import ${imported.length} words? This will overwrite current data and clear version history.`)) {
+                const shouldImportWordsOnly = await showInPageConfirm({
+                    title: 'Import Words',
+                    message: `Import ${imported.length} words? This will overwrite current data and clear version history.`,
+                    confirmText: 'Import',
+                    cancelText: 'Cancel'
+                });
+                if (shouldImportWordsOnly) {
                     importWordsOnly(imported);
                 }
             } else if (imported.words && Array.isArray(imported.words)) {
                 if (isSameProject) {
-                    if (confirm(`Same project detected.\nOverwrite current data? (imported data will be added as a new branch in version history)`)) {
+                    const shouldOverwriteWordsOnly = await showInPageConfirm({
+                        title: 'Same Project Detected',
+                        message: 'Overwrite current data? (imported data will be added as a new branch in version history)',
+                        confirmText: 'Overwrite',
+                        cancelText: 'Cancel'
+                    });
+                    if (shouldOverwriteWordsOnly) {
                         importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
                     }
                 } else {
-                    if (confirm(`Import ${imported.words.length} words? This will overwrite current data and clear version history.`)) {
+                    const shouldImportWords = await showInPageConfirm({
+                        title: 'Import Words',
+                        message: `Import ${imported.words.length} words? This will overwrite current data and clear version history.`,
+                        confirmText: 'Import',
+                        cancelText: 'Cancel'
+                    });
+                    if (shouldImportWords) {
                         importWordsOnly(imported.words);
                         if (importedProjectId) {
-                            localStorage.setItem(PROJECT_ID_KEY, importedProjectId);
+                            setProjectId(importedProjectId);
                         }
                     }
                 }
@@ -2122,6 +2247,12 @@ document.addEventListener('keydown', function(e) {
         return;
     }
 
+    if (shouldHandleRegistryPreviewSelectAll(e, isInputFocused)) {
+        e.preventDefault();
+        selectRegistryPreviewContent();
+        return;
+    }
+
     // Cmd+Z (Mac) or Ctrl+Z (Windows/Linux) - Undo
     if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -2142,6 +2273,7 @@ function openSettingsModal() {
 
     const settings = versionControl.getSettings();
     document.getElementById('maxVersionsInput').value = settings.maxVersions;
+    document.getElementById('projectIdInput').value = getProjectId();
     document.getElementById('settingsModal').classList.add('active');
 }
 
@@ -2153,15 +2285,39 @@ function saveSettings() {
     if (!versionControl) return;
 
     const maxVersions = parseInt(document.getElementById('maxVersionsInput').value, 10);
+    const projectIdInput = document.getElementById('projectIdInput');
+    const projectId = projectIdInput ? projectIdInput.value.trim() : '';
 
     if (isNaN(maxVersions) || maxVersions < 10 || maxVersions > 200) {
         alert('Max versions must be between 10 and 200');
         return;
     }
 
+    if (!projectId) {
+        alert('Profile ID cannot be empty');
+        return;
+    }
+
+    if (projectId.length > 128) {
+        alert('Profile ID must be 128 characters or less');
+        return;
+    }
+
     versionControl.updateSettings({ maxVersions: maxVersions });
+    setProjectId(projectId);
+    if (projectIdInput) {
+        projectIdInput.value = projectId;
+    }
     showStatus('Settings saved', 'success');
     closeSettingsModal();
+}
+
+function generateProjectIdForSettings() {
+    const projectIdInput = document.getElementById('projectIdInput');
+    if (!projectIdInput) return;
+    projectIdInput.value = createProjectId();
+    projectIdInput.focus();
+    projectIdInput.select();
 }
 
 // Version history functions — Registry Editor Style
@@ -2178,70 +2334,208 @@ let _historySelectedId = null;
 let _historyExpandedSet = new Set();
 let _historyPreviewMode = 'version'; // 'version' or 'diff'
 let _historyCheckedSet = new Set(); // For batch operations
+let _confirmModalResolver = null;
+
+function getVersionNode(versionId) {
+    if (!versionControl || !versionId) return null;
+    return versionControl.versions.get(versionId) || null;
+}
+
+function getSortedChildIds(versionId) {
+    const version = getVersionNode(versionId);
+    if (!version) return [];
+
+    const uniqueChildIds = Array.from(new Set(version.children || []));
+    return uniqueChildIds
+        .filter(childId => versionControl.versions.has(childId))
+        .sort((a, b) => {
+            const vA = versionControl.versions.get(a);
+            const vB = versionControl.versions.get(b);
+            const tA = Date.parse(vA && vA.timestamp ? vA.timestamp : 0) || 0;
+            const tB = Date.parse(vB && vB.timestamp ? vB.timestamp : 0) || 0;
+            if (tA !== tB) return tA - tB;
+            return a.localeCompare(b);
+        });
+}
+
+function normalizeHistoryState() {
+    if (!versionControl) return;
+    const validIds = versionControl.versions;
+
+    _historyCheckedSet = new Set(
+        Array.from(_historyCheckedSet).filter(id => validIds.has(id))
+    );
+
+    _historyExpandedSet = new Set(
+        Array.from(_historyExpandedSet).filter(id => validIds.has(id))
+    );
+
+    if (versionControl.rootId && validIds.has(versionControl.rootId)) {
+        _historyExpandedSet.add(versionControl.rootId);
+    }
+
+    if (_historySelectedId && !validIds.has(_historySelectedId)) {
+        _historySelectedId = versionControl.currentId && validIds.has(versionControl.currentId)
+            ? versionControl.currentId
+            : (versionControl.rootId && validIds.has(versionControl.rootId) ? versionControl.rootId : null);
+    }
+}
+
+function expandPathToVersion(versionId) {
+    let cursor = versionId;
+    const visited = new Set();
+
+    while (cursor && !visited.has(cursor)) {
+        visited.add(cursor);
+        _historyExpandedSet.add(cursor);
+        const version = getVersionNode(cursor);
+        cursor = version ? version.parentId : null;
+    }
+}
+
+function buildVersionPath(versionId) {
+    const chain = [];
+    let cursor = versionId;
+    const visited = new Set();
+
+    while (cursor && !visited.has(cursor)) {
+        visited.add(cursor);
+        const version = getVersionNode(cursor);
+        if (!version) break;
+        chain.unshift({ id: cursor, version });
+        cursor = version.parentId;
+    }
+
+    return chain;
+}
+
+function getVersionDisplayLabel(version) {
+    if (!version) return '';
+    const desc = (version.description || '').trim();
+    return desc || formatVersionDate(version.timestamp);
+}
+
+function getVersionDepth(versionId) {
+    let depth = 0;
+    let cursor = versionId;
+    const visited = new Set();
+
+    while (cursor && !visited.has(cursor)) {
+        visited.add(cursor);
+        const version = getVersionNode(cursor);
+        if (!version || !version.parentId) break;
+        depth++;
+        cursor = version.parentId;
+    }
+
+    return depth;
+}
+
+function isDescendantOf(versionId, ancestorId) {
+    if (!versionId || !ancestorId || versionId === ancestorId) return false;
+    let cursor = versionId;
+    const visited = new Set();
+
+    while (cursor && !visited.has(cursor)) {
+        visited.add(cursor);
+        const version = getVersionNode(cursor);
+        if (!version) return false;
+        if (version.parentId === ancestorId) return true;
+        cursor = version.parentId;
+    }
+
+    return false;
+}
+
+function resolveInPageConfirm(result) {
+    const modal = document.getElementById('confirmModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+
+    const resolver = _confirmModalResolver;
+    _confirmModalResolver = null;
+    if (resolver) {
+        resolver(result);
+    }
+}
+
+function initInPageConfirmModal() {
+    const modal = document.getElementById('confirmModal');
+    const confirmBtn = document.getElementById('confirmModalConfirmBtn');
+    const cancelBtn = document.getElementById('confirmModalCancelBtn');
+    if (!modal || !confirmBtn || !cancelBtn) return;
+    if (modal.dataset.bound === '1') return;
+
+    modal.dataset.bound = '1';
+    confirmBtn.addEventListener('click', function() {
+        resolveInPageConfirm(true);
+    });
+    cancelBtn.addEventListener('click', function() {
+        resolveInPageConfirm(false);
+    });
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            resolveInPageConfirm(false);
+        }
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        if (!modal.classList.contains('active')) return;
+        e.preventDefault();
+        resolveInPageConfirm(false);
+    });
+}
+
+function showInPageConfirm({
+    title = 'Confirm',
+    message = 'Are you sure?',
+    confirmText = 'Confirm',
+    cancelText = 'Cancel'
+} = {}) {
+    const modal = document.getElementById('confirmModal');
+    const titleEl = document.getElementById('confirmModalTitle');
+    const messageEl = document.getElementById('confirmModalMessage');
+    const confirmBtn = document.getElementById('confirmModalConfirmBtn');
+    const cancelBtn = document.getElementById('confirmModalCancelBtn');
+
+    if (!modal || !titleEl || !messageEl || !confirmBtn || !cancelBtn) {
+        return Promise.resolve(false);
+    }
+
+    if (_confirmModalResolver) {
+        _confirmModalResolver(false);
+        _confirmModalResolver = null;
+    }
+
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    confirmBtn.textContent = confirmText;
+    cancelBtn.textContent = cancelText;
+
+    return new Promise((resolve) => {
+        _confirmModalResolver = resolve;
+        modal.classList.add('active');
+        requestAnimationFrame(() => confirmBtn.focus({ preventScroll: true }));
+    });
+}
 
 function openHistoryModal() {
     if (!versionControl) return;
 
     _historyExpandedSet.clear();
     _historyCheckedSet.clear();
-    _historySelectedId = null;
-    const currentId = versionControl.currentId;
-    const rootId = versionControl.rootId;
+    _historySelectedId = versionControl.currentId || versionControl.rootId || null;
 
-    if (rootId) {
-        // Always expand the root (initial version)
-        _historyExpandedSet.add(rootId);
-
-        const root = versionControl.versions.get(rootId);
-        if (root && root.children.length > 0) {
-            // Sort first-level children by timestamp
-            const sortedChildren = [...root.children].sort((a, b) => {
-                const vA = versionControl.versions.get(a);
-                const vB = versionControl.versions.get(b);
-                return new Date(vA.timestamp) - new Date(vB.timestamp);
-            });
-
-            // Last first-level directory: expand it and all its descendants
-            const lastChildId = sortedChildren[sortedChildren.length - 1];
-            const expandAllDescendants = (id) => {
-                _historyExpandedSet.add(id);
-                const v = versionControl.versions.get(id);
-                if (v && v.children.length > 0) {
-                    v.children.forEach(cid => expandAllDescendants(cid));
-                }
-            };
-            expandAllDescendants(lastChildId);
-
-            // Find the deepest last leaf of the last first-level directory
-            const findDeepestLastLeaf = (id) => {
-                const v = versionControl.versions.get(id);
-                if (!v || v.children.length === 0) return id;
-                const sorted = [...v.children].sort((a, b) => {
-                    const vA = versionControl.versions.get(a);
-                    const vB = versionControl.versions.get(b);
-                    return new Date(vA.timestamp) - new Date(vB.timestamp);
-                });
-                return findDeepestLastLeaf(sorted[sorted.length - 1]);
-            };
-            const deepestLastLeaf = findDeepestLastLeaf(lastChildId);
-
-            // If current version is not the deepest last leaf, also expand path to current
-            if (currentId && currentId !== deepestLastLeaf) {
-                let id = currentId;
-                while (id) {
-                    _historyExpandedSet.add(id);
-                    const v = versionControl.versions.get(id);
-                    id = v ? v.parentId : null;
-                }
-            }
-        }
+    if (versionControl.rootId) {
+        _historyExpandedSet.add(versionControl.rootId);
     }
-
-    if (currentId) {
-        _historySelectedId = currentId;
+    if (_historySelectedId) {
+        expandPathToVersion(_historySelectedId);
     }
 
     _historyPreviewMode = 'version';
+    normalizeHistoryState();
     closeSettingsModal();
     document.getElementById('historyModal').classList.add('active');
     renderRegistryTree();
@@ -2252,13 +2546,25 @@ function openHistoryModal() {
     updateRegistryToolbarButtons();
 }
 
-function closeHistoryModal() {
+async function closeHistoryModal() {
+    if (!versionControl) {
+        document.getElementById('historyModal').classList.remove('active');
+        closeMobilePreview();
+        return;
+    }
+
     // If a version is selected and it's not the current version, ask to apply
     if (_historySelectedId && _historySelectedId !== versionControl.currentId) {
         const version = versionControl.versions.get(_historySelectedId);
         if (version) {
             const desc = version.description || formatVersionDate(version.timestamp);
-            if (confirm(`Apply selected version?\n"${desc}"`)) {
+            const shouldApply = await showInPageConfirm({
+                title: 'Apply Version',
+                message: `Apply selected version?\n"${desc}"`,
+                confirmText: 'Apply',
+                cancelText: 'Keep Current'
+            });
+            if (shouldApply) {
                 goToVersionById(_historySelectedId);
             }
         }
@@ -2269,27 +2575,22 @@ function closeHistoryModal() {
 
 function updateRegistryAddressBar() {
     const pathEl = document.getElementById('registryPath');
+    if (!pathEl || !versionControl) return;
 
-    // Build ancestor chain from root to selected
-    const chain = [];
-    if (_historySelectedId) {
-        let id = _historySelectedId;
-        while (id) {
-            const ver = versionControl.versions.get(id);
-            if (!ver) break;
-            chain.unshift({ id: id, label: formatVersionDate(ver.timestamp) });
-            id = ver.parentId;
-        }
-    }
+    const chain = _historySelectedId ? buildVersionPath(_historySelectedId) : [];
 
     // Render clickable breadcrumbs
     let html = '<span class="registry-path-seg registry-path-root" onclick="navToRoot()">History</span>';
     chain.forEach((seg, i) => {
         html += '<span class="registry-path-sep">\\</span>';
         const isLast = i === chain.length - 1;
-        html += `<span class="registry-path-seg${isLast ? ' registry-path-active' : ''}" onclick="selectVersionNode('${seg.id}')">${seg.label}</span>`;
+        const label = getVersionDisplayLabel(seg.version);
+        html += `<span class="registry-path-seg${isLast ? ' registry-path-active' : ''}" onclick="selectVersionNode('${seg.id}')">${escapeHtml(label)}</span>`;
     });
     pathEl.innerHTML = html;
+    requestAnimationFrame(() => {
+        pathEl.scrollLeft = pathEl.scrollWidth;
+    });
 }
 
 function navToRoot() {
@@ -2298,9 +2599,11 @@ function navToRoot() {
     _historySelectedId = versionControl.rootId;
     _historyExpandedSet.clear();
     _historyExpandedSet.add(versionControl.rootId);
+    _historyCheckedSet.clear();
     renderRegistryTree();
     renderRegistryPreview();
     updateRegistryAddressBar();
+    updateRegistryToolbarButtons();
 }
 
 function updateRegistryStatus() {
@@ -2335,90 +2638,119 @@ function switchPreviewMode(mode) {
 function renderRegistryTree() {
     if (!versionControl) return;
     const container = document.getElementById('historyTree');
+    if (!container) return;
+
+    normalizeHistoryState();
+
     if (!versionControl.rootId) {
         container.innerHTML = '<div class="registry-preview-empty">No Version History</div>';
         return;
     }
-    container.innerHTML = buildTreeNodeHTML(versionControl.rootId, 0, []);
+
+    container.innerHTML = buildRegistryTreeHTML();
 }
 
-function buildTreeNodeHTML(versionId, depth, parentLines) {
-    const version = versionControl.versions.get(versionId);
-    if (!version) return '';
+function buildRegistryTreeHTML() {
+    if (!versionControl || !versionControl.rootId) return '';
 
+    const rows = [];
+    const visited = new Set();
+
+    const walk = (versionId, depth, visualDepth) => {
+        if (!versionId || visited.has(versionId)) return;
+        const version = getVersionNode(versionId);
+        if (!version) return;
+        visited.add(versionId);
+
+        const sortedChildren = getSortedChildIds(versionId);
+        const hasChildren = sortedChildren.length > 0;
+        const isExpanded = _historyExpandedSet.has(versionId);
+
+        rows.push({
+            versionId,
+            version,
+            depth,
+            visualDepth,
+            hasChildren,
+            isExpanded,
+            childCount: sortedChildren.length
+        });
+
+        if (!hasChildren || !isExpanded) return;
+
+        const childVisualDepth = visualDepth + (sortedChildren.length > 1 ? 1 : 0);
+        sortedChildren.forEach((childId) => {
+            walk(childId, depth + 1, childVisualDepth);
+        });
+    };
+
+    walk(versionControl.rootId, 0, 0);
+
+    return rows.map(renderTreeRowHTML).join('');
+}
+
+function renderTreeRowHTML(row) {
+    const { versionId, version, depth, visualDepth, hasChildren, isExpanded, childCount } = row;
     const isCurrent = versionId === versionControl.currentId;
     const isSelected = versionId === _historySelectedId;
-    const childCount = version.children.length;
-    const isFork = childCount > 1;
-    const isLinear = childCount === 1;
-    const isExpanded = _historyExpandedSet.has(versionId);
+    const isChecked = _historyCheckedSet.has(versionId);
 
-    // Shorten description
-    let desc = version.description || '';
-    if (desc.length > 30) desc = desc.substring(0, 28) + '…';
-
-    // Build indent guides
-    let indentHTML = '';
-    for (let i = 0; i < depth; i++) {
-        const hasLine = parentLines[i];
-        indentHTML += `<span class="tree-indent${hasLine ? ' has-line' : ''}"></span>`;
-    }
-
-    // Toggle icon: only show for fork nodes (2+ children)
-    const toggleClass = isFork
+    const toggleClass = hasChildren
         ? (isExpanded ? 'tree-toggle has-children expanded' : 'tree-toggle has-children')
         : 'tree-toggle no-children';
 
-    // Row classes
     let rowClass = 'tree-node-row';
     if (isCurrent) rowClass += ' current-version';
     if (isSelected) rowClass += ' selected';
 
-    const isChecked = _historyCheckedSet.has(versionId);
+    const label = getVersionDisplayLabel(version);
+    const wordCount = Number.isFinite(version.wordCount)
+        ? version.wordCount
+        : (Array.isArray(version.data) ? version.data.length : 0);
+    const branchCount = childCount;
+    const compressedDepth = Math.max(0, depth - visualDepth);
 
-    let html = `<div class="tree-node">`;
-    html += `<div class="${rowClass}" data-id="${versionId}" onclick="selectVersionNode('${versionId}')" ondblclick="goToVersionById('${versionId}')">`;
-    html += indentHTML;
+    let html = `<div class="${rowClass}" style="--tree-fork-depth:${visualDepth}" data-id="${versionId}" onclick="selectVersionNode('${versionId}')" ondblclick="goToVersionById('${versionId}')">`;
+    html += `<span class="tree-indent-block" aria-hidden="true"></span>`;
     html += `<input type="checkbox" class="tree-checkbox" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleTreeCheck('${versionId}')" tabindex="-1">`;
     html += `<span class="${toggleClass}" onclick="event.stopPropagation(); toggleTreeNode('${versionId}')"></span>`;
     html += `<span class="tree-label">`;
-    html += `<span class="tree-label-desc">${escapeHtml(desc)}</span>`;
-    if (isCurrent) html += `<span class="tree-label-current">current</span>`;
+    html += `<span class="tree-label-main">`;
+    html += `<span class="tree-label-desc">${escapeHtml(label)}</span>`;
+    html += `</span>`;
+    html += `<span class="tree-label-meta">`;
+    if (branchCount > 1) {
+        html += `<span class="tree-label-branch">${branchCount} branches</span>`;
+    }
+    if (compressedDepth >= 3) {
+        html += `<span class="tree-label-compressed">+${compressedDepth}</span>`;
+    }
+    html += `<span class="tree-label-count">(${wordCount})</span>`;
+    html += `</span>`;
     html += `</span>`;
     html += `</div>`;
 
-    if (isLinear) {
-        // Linear chain: render child at the same depth, flat list style
-        html += buildTreeNodeHTML(version.children[0], depth, parentLines);
-    } else if (isFork) {
-        // Fork: render branches with tree indentation
-        html += `<div class="tree-children${isExpanded ? ' expanded' : ''}">`;
-        const sortedChildren = [...version.children].sort((a, b) => {
-            const vA = versionControl.versions.get(a);
-            const vB = versionControl.versions.get(b);
-            return new Date(vA.timestamp) - new Date(vB.timestamp);
-        });
-        sortedChildren.forEach((childId, idx) => {
-            const isLast = idx === sortedChildren.length - 1;
-            const newParentLines = [...parentLines, !isLast];
-            html += buildTreeNodeHTML(childId, depth + 1, newParentLines);
-        });
-        html += `</div>`;
-    }
-
-    html += `</div>`;
     return html;
 }
 
 function escapeHtml(str) {
     const div = document.createElement('div');
-    div.textContent = str;
+    div.textContent = str === null || str === undefined ? '' : String(str);
     return div.innerHTML;
 }
 
 function toggleTreeNode(versionId) {
+    const childIds = getSortedChildIds(versionId);
+    if (childIds.length === 0) return;
+
     if (_historyExpandedSet.has(versionId)) {
         _historyExpandedSet.delete(versionId);
+
+        if (_historySelectedId && isDescendantOf(_historySelectedId, versionId)) {
+            _historySelectedId = versionId;
+            renderRegistryPreview();
+            updateRegistryAddressBar();
+        }
     } else {
         _historyExpandedSet.add(versionId);
     }
@@ -2450,59 +2782,60 @@ function updateRegistryToolbarButtons() {
     }
 }
 
-function deleteSelectedVersions() {
+async function deleteSelectedVersions() {
     if (_historyCheckedSet.size === 0) return;
 
-    // Check if current version is in the set
-    const currentId = versionControl.currentId;
-    const deletingCurrent = _historyCheckedSet.has(currentId);
-    const deletingRoot = _historyCheckedSet.has(versionControl.rootId);
+    let selectedIds = Array.from(_historyCheckedSet)
+        .filter(id => versionControl.versions.has(id))
+        .sort((a, b) => getVersionDepth(b) - getVersionDepth(a));
 
-    if (deletingRoot) {
-        alert('Cannot delete the root version.');
-        return;
-    }
+    const hadRootSelected = selectedIds.includes(versionControl.rootId);
+    selectedIds = selectedIds.filter(id => id !== versionControl.rootId);
+    const selectedCount = selectedIds.length;
 
-    // Check if any checked version is an ancestor of current
-    let wouldOrphanCurrent = false;
-    if (!deletingCurrent) {
-        for (const checkedId of _historyCheckedSet) {
-            // Check if checkedId is an ancestor of currentId
-            let id = currentId;
-            while (id) {
-                if (id === checkedId) { wouldOrphanCurrent = true; break; }
-                const v = versionControl.versions.get(id);
-                id = v ? v.parentId : null;
-            }
-            if (wouldOrphanCurrent) break;
+    if (selectedCount === 0) {
+        _historyCheckedSet.clear();
+        updateRegistryToolbarButtons();
+        if (hadRootSelected) {
+            alert('Cannot delete the root version.');
         }
-    }
-
-    if (deletingCurrent || wouldOrphanCurrent) {
-        alert('Cannot delete versions in the current version path.');
         return;
     }
 
-    if (!confirm(`Delete ${_historyCheckedSet.size} version(s) and all their children? This cannot be undone.`)) {
-        return;
-    }
+    const currentId = versionControl.currentId;
+    const deletingCurrent = selectedIds.includes(currentId);
 
-    for (const versionId of _historyCheckedSet) {
+    const shouldDelete = await showInPageConfirm({
+        title: 'Delete Versions',
+        message: `Delete ${selectedCount} version(s)?\n\nTheir children will be kept and reparented.`,
+        confirmText: 'Delete',
+        cancelText: 'Cancel'
+    });
+    if (!shouldDelete) return;
+
+    for (const versionId of selectedIds) {
         const version = versionControl.versions.get(versionId);
         if (!version) continue;
+        versionControl.deleteVersionAndReparentChildren(versionId);
+    }
 
-        // Remove from parent's children
-        if (version.parentId) {
-            const parent = versionControl.versions.get(version.parentId);
-            if (parent) {
-                parent.children = parent.children.filter(id => id !== versionId);
-            }
-        }
-
-        versionControl.deleteVersionAndChildren(versionId);
+    if (!versionControl.currentId || !versionControl.versions.has(versionControl.currentId)) {
+        versionControl.currentId = (versionControl.rootId && versionControl.versions.has(versionControl.rootId))
+            ? versionControl.rootId
+            : null;
     }
 
     versionControl.saveHistory();
+
+    if (deletingCurrent) {
+        const currentVersion = versionControl.versions.get(versionControl.currentId);
+        if (currentVersion) {
+            words = JSON.parse(JSON.stringify(currentVersion.data));
+            localStorage.setItem('wordMemoryData', JSON.stringify(words));
+            renderWords();
+        }
+    }
+
     _historyCheckedSet.clear();
 
     if (_historySelectedId && !versionControl.versions.has(_historySelectedId)) {
@@ -2514,7 +2847,12 @@ function deleteSelectedVersions() {
     updateRegistryStatus();
     updateRegistryAddressBar();
     updateRegistryToolbarButtons();
-    showStatus(`Deleted ${_historyCheckedSet.size || 'selected'} version(s)`, 'success');
+
+    if (hadRootSelected) {
+        showStatus(`Deleted ${selectedCount} version(s). Root version was skipped.`, 'success');
+        return;
+    }
+    showStatus(`Deleted ${selectedCount} version(s)`, 'success');
 }
 
 function renameSelectedVersion() {
@@ -2538,15 +2876,10 @@ function renameSelectedVersion() {
 }
 
 function selectVersionNode(versionId) {
-    _historySelectedId = versionId;
+    if (!versionControl || !versionControl.versions.has(versionId)) return;
 
-    // Ensure all ancestors are expanded so the node is visible
-    let id = versionId;
-    while (id) {
-        _historyExpandedSet.add(id);
-        const v = versionControl.versions.get(id);
-        id = v ? v.parentId : null;
-    }
+    _historySelectedId = versionId;
+    expandPathToVersion(versionId);
 
     renderRegistryTree();
     renderRegistryPreview();
@@ -2776,6 +3109,8 @@ document.getElementById('historyModal').addEventListener('click', function(e) {
         closeHistoryModal();
     }
 });
+
+initInPageConfirmModal();
 
 // Registry divider drag-to-resize
 (function() {
