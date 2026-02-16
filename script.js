@@ -483,6 +483,7 @@ let selectedWords = new Set();
 let isSelectMode = false;
 let versionControl = null;
 let wordSortMode = 'alpha'; // 'alpha' or 'chrono'
+let cachedVoices = [];
 let appSettings = sanitizeAppSettings(null);
 
 // Audio preload cache: word -> { url, buffer (decoded AudioBuffer), status }
@@ -1095,11 +1096,11 @@ window.onload = function() {
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('dateInput').value = today;
 
-    // Load voices for speech synthesis
+    // Load voices for speech synthesis — cache for iOS which loads them async
     if ('speechSynthesis' in window) {
-        speechSynthesis.getVoices();
+        cachedVoices = speechSynthesis.getVoices();
         speechSynthesis.onvoiceschanged = () => {
-            speechSynthesis.getVoices();
+            cachedVoices = speechSynthesis.getVoices();
         };
     }
 
@@ -1118,6 +1119,7 @@ window.onload = function() {
     updateBatchToolbar();
     initResponsiveDateInputs();
     initResizableLayout();
+    initDragAndDropImport();
     updatePortraitModeSwitchTop();
 };
 
@@ -1417,7 +1419,8 @@ async function deleteWord(index) {
         title: 'Delete Word',
         message: `Delete "${wordName}"?`,
         confirmText: 'Delete',
-        cancelText: 'Cancel'
+        cancelText: 'Cancel',
+        confirmTone: 'danger'
     });
     if (!shouldDelete) return;
 
@@ -1753,7 +1756,8 @@ async function batchDeleteConfirm() {
         title: 'Delete Words',
         message: `Delete ${count} selected word(s)?`,
         confirmText: 'Delete',
-        cancelText: 'Cancel'
+        cancelText: 'Cancel',
+        confirmTone: 'danger'
     });
     if (!shouldDelete) return;
 
@@ -1843,21 +1847,49 @@ function pronounceWord(word) {
 }
 
 function pronounceFallback(word) {
-    if ('speechSynthesis' in window) {
-        speechSynthesis.cancel();
+    if (!('speechSynthesis' in window)) {
+        showStatus('Pronunciation not supported', 'error');
+        return;
+    }
+
+    // iOS fix: cancel then delay before speak — immediate speak after cancel silently fails
+    speechSynthesis.cancel();
+
+    const doSpeak = () => {
         const utterance = new SpeechSynthesisUtterance(word);
         utterance.lang = 'en-GB';
         utterance.rate = 0.8;
-        const voices = speechSynthesis.getVoices();
-        const britishVoice = voices.find(voice =>
-            voice.lang.startsWith('en-GB') || voice.lang.startsWith('en-UK')
+
+        // Use cached voices (populated via voiceschanged), fallback to fresh call
+        const voices = cachedVoices.length > 0 ? cachedVoices : speechSynthesis.getVoices();
+        const britishVoice = voices.find(v =>
+            v.lang.startsWith('en-GB') || v.lang.startsWith('en-UK')
         );
         if (britishVoice) utterance.voice = britishVoice;
+
+        // iOS Safari bug: speech pauses after ~15s. Keep-alive timer resumes it.
+        let iosResumeTimer = null;
+        utterance.onstart = () => {
+            iosResumeTimer = setInterval(() => {
+                if (speechSynthesis.paused) speechSynthesis.resume();
+            }, 5000);
+        };
+        const cleanup = () => { if (iosResumeTimer) { clearInterval(iosResumeTimer); iosResumeTimer = null; } };
+        utterance.onend = cleanup;
+        utterance.onerror = (e) => {
+            cleanup();
+            // 'interrupted' is normal (user clicked again), only log real errors
+            if (e.error !== 'interrupted') {
+                showStatus('Pronunciation failed', 'error');
+            }
+        };
+
         speechSynthesis.speak(utterance);
         showStatus(`Pronouncing "${word}"`, 'info');
-    } else {
-        showStatus('Pronunciation not supported', 'error');
-    }
+    };
+
+    // iOS needs ~100ms gap after cancel() before speak() will work
+    setTimeout(doSpeak, 100);
 }
 
 // Open edit modal
@@ -2284,108 +2316,211 @@ function importWithVersionHistory(importedData) {
     }
 }
 
-// Import data (enhanced with version history and projectId support)
-function importData(event) {
-    const file = event.target.files[0];
+function isJsonImportFile(file) {
+    if (!file) return false;
+
+    const type = String(file.type || '').toLowerCase();
+    const name = String(file.name || '').toLowerCase();
+
+    return type === 'application/json' || type === 'text/json' || name.endsWith('.json');
+}
+
+async function importDataFromFile(file) {
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async function(e) {
-        try {
-            const imported = JSON.parse(e.target.result);
-            const localProjectId = getProjectId();
-            const importedProjectId = imported.projectId || null;
-            const isSameProject = importedProjectId && importedProjectId === localProjectId;
+    if (!isJsonImportFile(file)) {
+        showStatus('Only JSON files can be imported', 'error');
+        return;
+    }
 
-            // Check if it contains version history
-            if (imported.versionHistory) {
-                const validation = validateVersionHistory(imported.versionHistory);
+    const shouldStartImport = await showInPageConfirm({
+        title: 'Import JSON File',
+        message: `Import "${file.name}"?`,
+        confirmText: 'Import',
+        cancelText: 'Cancel'
+    });
+    if (!shouldStartImport) {
+        return;
+    }
 
-                if (!validation.valid) {
-                    const shouldContinueImport = await showInPageConfirm({
-                        title: 'Version History Corrupted',
-                        message: `Version history is corrupted: ${validation.error}\n\nContinue importing data only (version history will be cleared)?`,
-                        confirmText: 'Continue',
-                        cancelText: 'Cancel'
-                    });
-                    if (shouldContinueImport) {
-                        importWordsOnly(imported.words || imported);
-                    }
-                    event.target.value = '';
-                    return;
+    try {
+        const imported = JSON.parse(await file.text());
+        const localProjectId = getProjectId();
+        const importedProjectId = imported && typeof imported === 'object'
+            ? imported.projectId || null
+            : null;
+        const isSameProject = importedProjectId && importedProjectId === localProjectId;
+
+        // Check if it contains version history
+        if (imported && imported.versionHistory) {
+            const validation = validateVersionHistory(imported.versionHistory);
+
+            if (!validation.valid) {
+                const shouldContinueImport = await showInPageConfirm({
+                    title: 'Version History Corrupted',
+                    message: `Version history is corrupted: ${validation.error}\n\nContinue importing data only (version history will be cleared)?`,
+                    confirmText: 'Continue',
+                    cancelText: 'Cancel'
+                });
+                if (shouldContinueImport) {
+                    importWordsOnly(imported.words || imported);
                 }
+                return;
+            }
 
-                if (isSameProject) {
-                    // Same project: ask overwrite (creates new branch) or full replace
-                    const shouldOverwriteSameProject = await showInPageConfirm({
-                        title: 'Same Project Detected',
-                        message: 'Overwrite current data? (imported data will be added as a new branch in version history)',
-                        confirmText: 'Overwrite',
-                        cancelText: 'Cancel'
-                    });
-                    if (shouldOverwriteSameProject) {
-                        importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
-                    }
-                } else {
-                    const shouldImportWithHistory = await showInPageConfirm({
-                        title: 'Import With History',
-                        message: `Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`,
-                        confirmText: 'Import',
-                        cancelText: 'Cancel'
-                    });
-                    if (shouldImportWithHistory) {
-                        importWithVersionHistory(imported);
-                        // Adopt the imported project's ID
-                        if (importedProjectId) {
-                            setProjectId(importedProjectId);
-                        }
-                    }
+            if (isSameProject) {
+                // Same project: ask overwrite (creates new branch) or full replace
+                const shouldOverwriteSameProject = await showInPageConfirm({
+                    title: 'Same Project Detected',
+                    message: 'Overwrite current data? (imported data will be added as a new branch in version history)',
+                    confirmText: 'Overwrite',
+                    cancelText: 'Cancel'
+                });
+                if (shouldOverwriteSameProject) {
+                    importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
                 }
-            } else if (Array.isArray(imported)) {
-                // Old format - words array only
-                const shouldImportWordsOnly = await showInPageConfirm({
-                    title: 'Import Words',
-                    message: `Import ${imported.length} words? This will overwrite current data and clear version history.`,
+            } else {
+                const shouldImportWithHistory = await showInPageConfirm({
+                    title: 'Import With History',
+                    message: `Import ${imported.words.length} words with ${Object.keys(imported.versionHistory.versions).length} version(s)? This will overwrite current data and version history.`,
                     confirmText: 'Import',
                     cancelText: 'Cancel'
                 });
-                if (shouldImportWordsOnly) {
-                    importWordsOnly(imported);
+                if (shouldImportWithHistory) {
+                    importWithVersionHistory(imported);
+                    // Adopt the imported project's ID
+                    if (importedProjectId) {
+                        setProjectId(importedProjectId);
+                    }
                 }
-            } else if (imported.words && Array.isArray(imported.words)) {
-                if (isSameProject) {
-                    const shouldOverwriteWordsOnly = await showInPageConfirm({
-                        title: 'Same Project Detected',
-                        message: 'Overwrite current data? (imported data will be added as a new branch in version history)',
-                        confirmText: 'Overwrite',
-                        cancelText: 'Cancel'
-                    });
-                    if (shouldOverwriteWordsOnly) {
-                        importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
-                    }
-                } else {
-                    const shouldImportWords = await showInPageConfirm({
-                        title: 'Import Words',
-                        message: `Import ${imported.words.length} words? This will overwrite current data and clear version history.`,
-                        confirmText: 'Import',
-                        cancelText: 'Cancel'
-                    });
-                    if (shouldImportWords) {
-                        importWordsOnly(imported.words);
-                        if (importedProjectId) {
-                            setProjectId(importedProjectId);
-                        }
-                    }
+            }
+        } else if (Array.isArray(imported)) {
+            // Old format - words array only
+            const shouldImportWordsOnly = await showInPageConfirm({
+                title: 'Import Words',
+                message: `Import ${imported.length} words? This will overwrite current data and clear version history.`,
+                confirmText: 'Import',
+                cancelText: 'Cancel'
+            });
+            if (shouldImportWordsOnly) {
+                importWordsOnly(imported);
+            }
+        } else if (imported && imported.words && Array.isArray(imported.words)) {
+            if (isSameProject) {
+                const shouldOverwriteWordsOnly = await showInPageConfirm({
+                    title: 'Same Project Detected',
+                    message: 'Overwrite current data? (imported data will be added as a new branch in version history)',
+                    confirmText: 'Overwrite',
+                    cancelText: 'Cancel'
+                });
+                if (shouldOverwriteWordsOnly) {
+                    importAsOverwrite(imported.words, `Import overwrite (${imported.words.length} words)`);
                 }
             } else {
-                showStatus('Invalid file format', 'error');
+                const shouldImportWords = await showInPageConfirm({
+                    title: 'Import Words',
+                    message: `Import ${imported.words.length} words? This will overwrite current data and clear version history.`,
+                    confirmText: 'Import',
+                    cancelText: 'Cancel'
+                });
+                if (shouldImportWords) {
+                    importWordsOnly(imported.words);
+                    if (importedProjectId) {
+                        setProjectId(importedProjectId);
+                    }
+                }
             }
-        } catch (error) {
-            showStatus('Failed to parse file', 'error');
+        } else {
+            showStatus('Invalid file format', 'error');
         }
-        event.target.value = '';
-    };
-    reader.readAsText(file);
+    } catch (error) {
+        showStatus('Failed to parse file', 'error');
+    }
+}
+
+// Import data (enhanced with version history and projectId support)
+async function importData(event) {
+    const input = event && event.target ? event.target : null;
+    const file = input && input.files ? input.files[0] : null;
+    if (!file) return;
+
+    await importDataFromFile(file);
+
+    if (input) {
+        input.value = '';
+    }
+}
+
+let dragImportDepth = 0;
+
+function isFileDragEvent(event) {
+    if (!event || !event.dataTransfer) return false;
+    return Array.from(event.dataTransfer.types || []).includes('Files');
+}
+
+function setDragImportOverlayVisible(isVisible) {
+    if (!document.body) return;
+    document.body.classList.toggle('drag-import-active', isVisible);
+}
+
+function clearDragImportOverlay() {
+    dragImportDepth = 0;
+    setDragImportOverlayVisible(false);
+}
+
+function initDragAndDropImport() {
+    if (!document.body) return;
+    if (document.body.dataset.dragImportBound === '1') return;
+    document.body.dataset.dragImportBound = '1';
+
+    window.addEventListener('dragenter', function(event) {
+        if (!isFileDragEvent(event)) return;
+        event.preventDefault();
+        dragImportDepth += 1;
+        setDragImportOverlayVisible(true);
+    });
+
+    window.addEventListener('dragover', function(event) {
+        if (!isFileDragEvent(event)) return;
+        event.preventDefault();
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'copy';
+        }
+        setDragImportOverlayVisible(true);
+    });
+
+    window.addEventListener('dragleave', function(event) {
+        if (!isFileDragEvent(event)) return;
+        event.preventDefault();
+        dragImportDepth = Math.max(0, dragImportDepth - 1);
+        if (dragImportDepth === 0) {
+            setDragImportOverlayVisible(false);
+        }
+    });
+
+    window.addEventListener('dragend', clearDragImportOverlay);
+    window.addEventListener('blur', clearDragImportOverlay);
+
+    window.addEventListener('drop', async function(event) {
+        if (!isFileDragEvent(event)) return;
+        event.preventDefault();
+        clearDragImportOverlay();
+
+        const droppedFiles = Array.from((event.dataTransfer && event.dataTransfer.files) || []);
+        if (!droppedFiles.length) return;
+
+        const jsonFile = droppedFiles.find(isJsonImportFile);
+        if (!jsonFile) {
+            showStatus('Only JSON files can be imported', 'error');
+            return;
+        }
+
+        if (droppedFiles.length > 1) {
+            showStatus(`Multiple files detected, importing "${jsonFile.name}"`, 'info');
+        }
+
+        await importDataFromFile(jsonFile);
+    });
 }
 
 // Enter key to add word
@@ -2723,7 +2858,8 @@ function showInPageConfirm({
     title = 'Confirm',
     message = 'Are you sure?',
     confirmText = 'Confirm',
-    cancelText = 'Cancel'
+    cancelText = 'Cancel',
+    confirmTone = 'default'
 } = {}) {
     const modal = document.getElementById('confirmModal');
     const titleEl = document.getElementById('confirmModalTitle');
@@ -2744,6 +2880,7 @@ function showInPageConfirm({
     messageEl.textContent = message;
     confirmBtn.textContent = confirmText;
     cancelBtn.textContent = cancelText;
+    confirmBtn.classList.toggle('is-danger', confirmTone === 'danger');
 
     return new Promise((resolve) => {
         _confirmModalResolver = resolve;
@@ -3041,7 +3178,8 @@ async function deleteSelectedVersions() {
         title: 'Delete Versions',
         message: `Delete ${selectedCount} version(s)?\n\nTheir children will be kept and reparented.`,
         confirmText: 'Delete',
-        cancelText: 'Cancel'
+        cancelText: 'Cancel',
+        confirmTone: 'danger'
     });
     if (!shouldDelete) return;
 

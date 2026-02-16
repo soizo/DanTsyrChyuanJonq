@@ -1390,12 +1390,12 @@ button:disabled {
 	color: var(--color-text);
 }
 
-#confirmModalConfirmBtn.btn-primary {
+#confirmModalConfirmBtn.btn-primary.is-danger {
 	background: #B85450;
 	border-color: #B85450;
 }
 
-#confirmModalConfirmBtn.btn-primary:active {
+#confirmModalConfirmBtn.btn-primary.is-danger:active {
 	background: #A24A46;
 	border-color: #A24A46;
 }
@@ -2017,6 +2017,39 @@ button:disabled {
 /* ========================================
    Hidden
    ======================================== */
+
+.drag-import-overlay {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-lg);
+	background: rgba(245, 244, 240, 0.82);
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	z-index: 1800;
+	transition: opacity 120ms ease, visibility 120ms ease;
+}
+
+.drag-import-overlay-card {
+	min-width: min(420px, 100%);
+	padding: var(--space-xl);
+	border: 2px dashed var(--color-text);
+	background: var(--color-surface);
+	color: var(--color-text);
+	font-size: 14px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	text-align: center;
+}
+
+body.drag-import-active .drag-import-overlay {
+	opacity: 1;
+	visibility: visible;
+}
 
 #importFile {
 	display: none;
