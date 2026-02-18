@@ -670,6 +670,8 @@ let selectedWords = new Set();
 let isSelectMode = false;
 let versionControl = null;
 let wordSortMode = 'alpha'; // 'alpha', 'alpha-desc', 'chrono', 'chrono-desc'
+let wordGroupMode = 'weight'; // 'weight', 'tag'
+let activeTagFilters = new Set(); // tags selected for filtering display
 let cachedVoices = [];
 let appSettings = sanitizeAppSettings(null);
 
@@ -1273,6 +1275,9 @@ function resetAddAndBatchToolbarInputs() {
     const meaningInput = document.getElementById('meaningInput');
     if (meaningInput) meaningInput.value = '';
 
+    tagSelectorState.add = [];
+    renderTagSelector('add');
+
     selectedPos = [];
     updatePosSelection();
 
@@ -1304,6 +1309,8 @@ function resetAddAndBatchToolbarInputs() {
 // Initialize
 window.onload = function() {
     loadData();
+    loadTagRegistry();
+    migrateStringTagsToRegistry();
     appSettings = loadAppSettings();
 
     // Initialize version control
@@ -1341,10 +1348,37 @@ window.onload = function() {
     editPosDropdown = new Dropdown('editPosSelector', 'editPosSelected', 'editPosDropdown');
     editWeightDropdown = new Dropdown('editWeightSelector', 'editWeightSelected', 'editWeightDropdown');
 
+    tagDropdownInstance = new Dropdown('tagSelector', 'tagSelected', 'tagDropdown');
+    editTagDropdownInstance = new Dropdown('editTagSelector', 'editTagSelected', 'editTagDropdown');
+    batchTagFilterDropdownInstance = new Dropdown('batchTagFilterSelector', 'batchTagFilterSelected', 'batchTagFilterDropdown');
+    batchTagActionDropdownInstance = new Dropdown('batchTagActionSelector', 'batchTagActionSelected', 'batchTagActionDropdown');
+
+    // Refresh tag options when dropdown opens
+    const tagSelectedEl = document.getElementById('tagSelected');
+    if (tagSelectedEl) {
+        tagSelectedEl.addEventListener('click', () => renderTagSelector('add'));
+    }
+    const editTagSelectedEl = document.getElementById('editTagSelected');
+    if (editTagSelectedEl) {
+        editTagSelectedEl.addEventListener('click', () => renderTagSelector('edit'));
+    }
+    const batchTagFilterSelectedEl = document.getElementById('batchTagFilterSelected');
+    if (batchTagFilterSelectedEl) {
+        batchTagFilterSelectedEl.addEventListener('click', () => renderTagSelector('batchFilter'));
+    }
+    const batchTagActionSelectedEl = document.getElementById('batchTagActionSelected');
+    if (batchTagActionSelectedEl) {
+        batchTagActionSelectedEl.addEventListener('click', () => renderTagSelector('batchAction'));
+    }
+
     Dropdown.register(posDropdown);
     Dropdown.register(weightDropdown);
     Dropdown.register(editPosDropdown);
     Dropdown.register(editWeightDropdown);
+    Dropdown.register(tagDropdownInstance);
+    Dropdown.register(editTagDropdownInstance);
+    Dropdown.register(batchTagFilterDropdownInstance);
+    Dropdown.register(batchTagActionDropdownInstance);
 
     // Initialize batch toolbar
     updateBatchToolbar();
@@ -1596,6 +1630,299 @@ function setEditWeightOption(option, event) {
     }
 }
 
+// ========================================
+// Tag Registry
+// ========================================
+
+let tagRegistry = []; // Array of { id, name }
+let tagDropdownInstance = null;
+let editTagDropdownInstance = null;
+let batchTagFilterDropdownInstance = null;
+let batchTagActionDropdownInstance = null;
+
+const TAG_REGISTRY_KEY = 'wordMemoryTagRegistry';
+
+function generateTagId() {
+    return 't_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function saveTagRegistry() {
+    localStorage.setItem(TAG_REGISTRY_KEY, JSON.stringify(tagRegistry));
+}
+
+function loadTagRegistry() {
+    try {
+        const saved = localStorage.getItem(TAG_REGISTRY_KEY);
+        if (saved) tagRegistry = JSON.parse(saved);
+    } catch (e) {
+        tagRegistry = [];
+    }
+}
+
+function getTagName(id) {
+    const entry = tagRegistry.find(t => t.id === id);
+    return entry ? entry.name : '';
+}
+
+function getTagId(name) {
+    const lower = name.toLowerCase();
+    const entry = tagRegistry.find(t => t.name.toLowerCase() === lower);
+    return entry ? entry.id : null;
+}
+
+function createTag(name) {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    // Check if already exists (case-insensitive)
+    const existing = getTagId(trimmed);
+    if (existing) return existing;
+    const id = generateTagId();
+    tagRegistry.push({ id, name: trimmed });
+    saveTagRegistry();
+    return id;
+}
+
+function renameTag(id, newName) {
+    const trimmed = newName.trim();
+    if (!trimmed) return false;
+    const entry = tagRegistry.find(t => t.id === id);
+    if (!entry) return false;
+    entry.name = trimmed;
+    saveTagRegistry();
+    return true;
+}
+
+function deleteTag(id) {
+    tagRegistry = tagRegistry.filter(t => t.id !== id);
+    // Remove from all words
+    words.forEach(w => {
+        if (w.tags) w.tags = w.tags.filter(t => t !== id);
+    });
+    // Remove from active filters
+    activeTagFilters.delete(id);
+    saveTagRegistry();
+    saveData(false, `Delete tag`);
+}
+
+// Migrate old string-based tags to registry IDs
+function migrateStringTagsToRegistry() {
+    let migrated = false;
+    words.forEach(w => {
+        if (!w.tags || w.tags.length === 0) return;
+        w.tags = w.tags.map(t => {
+            // If it already looks like an ID (starts with t_), skip
+            if (typeof t === 'string' && t.startsWith('t_')) return t;
+            // It's an old string tag — find or create registry entry
+            migrated = true;
+            const existingId = getTagId(t);
+            if (existingId) return existingId;
+            const id = generateTagId();
+            tagRegistry.push({ id, name: t });
+            return id;
+        });
+    });
+    if (migrated) {
+        saveTagRegistry();
+        saveData(false);
+    }
+}
+
+// ========================================
+// Unified Tag Selector
+// ========================================
+
+const TAG_SELECTORS = {
+    add:         { selectedId: 'tagSelected', listId: 'tagOptionsList', inputId: 'tagNewInput', multi: true, placeholder: 'Tags' },
+    edit:        { selectedId: 'editTagSelected', listId: 'editTagOptionsList', inputId: 'editTagNewInput', multi: true, placeholder: 'Tags' },
+    batchFilter: { selectedId: 'batchTagFilterSelected', listId: 'batchTagFilterOptionsList', inputId: null, multi: false, placeholder: 'Tag' },
+    batchAction: { selectedId: 'batchTagActionSelected', listId: 'batchTagActionOptionsList', inputId: 'batchTagActionNewInput', multi: true, placeholder: 'Tag' },
+};
+
+let tagSelectorState = {
+    add: [],         // tag ID array
+    edit: [],        // tag ID array
+    batchFilter: '', // single tag ID
+    batchAction: [], // tag ID array
+};
+
+function getTagDropdownInstance(key) {
+    return { add: tagDropdownInstance, edit: editTagDropdownInstance, batchFilter: batchTagFilterDropdownInstance, batchAction: batchTagActionDropdownInstance }[key];
+}
+
+function renderTagSelector(key) {
+    const cfg = TAG_SELECTORS[key];
+    if (!cfg) return;
+    const state = tagSelectorState[key];
+
+    // Render selected display
+    const selectedEl = document.getElementById(cfg.selectedId);
+    if (selectedEl) {
+        if (cfg.multi) {
+            const ids = state || [];
+            if (ids.length === 0) {
+                selectedEl.innerHTML = `<span class="tag-placeholder">${cfg.placeholder}</span>`;
+            } else {
+                selectedEl.innerHTML = ids.map(id => `<span class="tag-sel-tag">${getTagName(id)}</span>`).join('');
+            }
+        } else {
+            const id = state;
+            if (id) {
+                selectedEl.innerHTML = `<span class="tag-sel-tag">${getTagName(id)}</span>`;
+            } else {
+                selectedEl.innerHTML = `<span class="tag-placeholder">${cfg.placeholder}</span>`;
+            }
+        }
+    }
+
+    // Render options list
+    const listEl = document.getElementById(cfg.listId);
+    if (listEl) {
+        const selectedSet = cfg.multi ? new Set(state || []) : new Set(state ? [state] : []);
+        listEl.innerHTML = tagRegistry.map(tag => {
+            const isSelected = selectedSet.has(tag.id) ? 'selected' : '';
+            return `<label class="dropdown-option tag-option ${isSelected}" data-value="${tag.id}">${tag.name}</label>`;
+        }).join('');
+
+        // Bind click handlers
+        listEl.querySelectorAll('.tag-option').forEach(option => {
+            option.onclick = function(e) {
+                e.stopPropagation();
+                const tagId = this.dataset.value;
+                if (cfg.multi) {
+                    toggleTagInSelector(key, tagId);
+                } else {
+                    setTagInSelector(key, tagId);
+                }
+            };
+        });
+    }
+}
+
+function toggleTagInSelector(key, tagId) {
+    const arr = tagSelectorState[key];
+    const idx = arr.indexOf(tagId);
+    if (idx !== -1) {
+        arr.splice(idx, 1);
+    } else {
+        arr.push(tagId);
+    }
+    renderTagSelector(key);
+}
+
+function setTagInSelector(key, tagId) {
+    tagSelectorState[key] = tagId;
+    renderTagSelector(key);
+    const dropdown = getTagDropdownInstance(key);
+    if (dropdown) dropdown.close();
+}
+
+function addNewTagToSelector(key, event) {
+    if (event) event.stopPropagation();
+    const cfg = TAG_SELECTORS[key];
+    if (!cfg || !cfg.inputId) return;
+    const input = document.getElementById(cfg.inputId);
+    if (!input) return;
+    const raw = input.value.trim();
+    if (!raw) return;
+    const names = raw.split(/[,，]/).map(t => t.trim()).filter(t => t.length > 0);
+    names.forEach(name => {
+        const id = createTag(name);
+        if (!id) return;
+        if (cfg.multi) {
+            if (!tagSelectorState[key].includes(id)) tagSelectorState[key].push(id);
+        } else {
+            tagSelectorState[key] = id;
+        }
+    });
+    input.value = '';
+    renderTagSelector(key);
+    if (!cfg.multi) {
+        const dropdown = getTagDropdownInstance(key);
+        if (dropdown) dropdown.close();
+    }
+}
+
+// Global function wrappers for onclick in HTML
+function addNewTagFromInput(event) { addNewTagToSelector('add', event); }
+function addNewEditTagFromInput(event) { addNewTagToSelector('edit', event); }
+function addBatchTagActionFromInput(event) { addNewTagToSelector('batchAction', event); }
+
+// Handle Enter key in all tag inputs
+document.addEventListener('DOMContentLoaded', () => {
+    Object.entries(TAG_SELECTORS).forEach(([key, cfg]) => {
+        if (!cfg.inputId) return;
+        const input = document.getElementById(cfg.inputId);
+        if (input) {
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    addNewTagToSelector(key, e);
+                }
+            });
+        }
+    });
+});
+
+// ========================================
+// Tag Filter Bar (filter displayed words)
+// ========================================
+
+function renderTagFilterBar() {
+    const bar = document.getElementById('tagFilterBar');
+    if (!bar) return;
+    if (tagRegistry.length === 0) {
+        bar.innerHTML = '';
+        return;
+    }
+    bar.innerHTML = tagRegistry.map(tag => {
+        const isActive = activeTagFilters.has(tag.id) ? 'active' : '';
+        return `<span class="tag-filter-chip ${isActive}" onclick="toggleTagFilter('${tag.id}')">${tag.name}</span>`;
+    }).join('');
+}
+
+function toggleTagFilter(tag) {
+    if (activeTagFilters.has(tag)) {
+        activeTagFilters.delete(tag);
+    } else {
+        activeTagFilters.add(tag);
+    }
+    renderTagFilterBar();
+    renderWords();
+}
+
+function enforceGroupModeByTagAvailability() {
+    if (tagRegistry.length === 0) {
+        wordGroupMode = 'weight';
+    }
+
+    const btn = document.getElementById('groupModeBtn');
+    if (btn) {
+        btn.textContent = wordGroupMode === 'tag' ? 'By Tag' : 'By Weight';
+    }
+}
+
+// ========================================
+// Group Mode Toggle
+// ========================================
+
+function toggleGroupMode() {
+    if (tagRegistry.length === 0) {
+        wordGroupMode = 'weight';
+        enforceGroupModeByTagAvailability();
+        renderWords();
+        return;
+    }
+
+    const modes = ['weight', 'tag'];
+    const labels = ['By Weight', 'By Tag'];
+    const idx = modes.indexOf(wordGroupMode);
+    wordGroupMode = modes[(idx + 1) % modes.length];
+    const btn = document.getElementById('groupModeBtn');
+    if (btn) btn.textContent = labels[modes.indexOf(wordGroupMode)];
+    renderWords();
+}
+
 // Close dropdowns when clicking outside
 document.addEventListener('click', function(e) {
     // Check if any dropdown is open
@@ -1620,6 +1947,7 @@ function addWord() {
     const meaning = document.getElementById('meaningInput').value.trim();
     const weight = selectedWeight;
     const date = document.getElementById('dateInput').value || new Date().toISOString().split('T')[0];
+    const tags = tagSelectorState.add.slice();
 
     if (!word) {
         alert('Please fill in word');
@@ -1631,7 +1959,8 @@ function addWord() {
         meaning: meaning,
         pos: selectedPos.slice(), // Copy array
         weight: weight,
-        added: date
+        added: date,
+        tags: tags
     };
 
     words.push(newWord);
@@ -1643,6 +1972,8 @@ function addWord() {
     // Clear form
     document.getElementById('wordInput').value = '';
     document.getElementById('meaningInput').value = '';
+    tagSelectorState.add = [];
+    renderTagSelector('add');
     selectedPos = [];
     updatePosSelection();
 }
@@ -1779,6 +2110,10 @@ function updateBatchToolbar() {
         batchDeleteBtn.textContent = hasSelection ? `Delete (${selectedWords.size})` : 'Delete';
     }
     if (batchSetDateBtn) batchSetDateBtn.disabled = !hasSelection;
+    const batchAddTagBtn = document.getElementById('batchAddTagBtn');
+    const batchRemoveTagBtn = document.getElementById('batchRemoveTagBtn');
+    if (batchAddTagBtn) batchAddTagBtn.disabled = !hasSelection;
+    if (batchRemoveTagBtn) batchRemoveTagBtn.disabled = !hasSelection;
 
     if (isSelectMode) {
         requestAnimationFrame(syncDateInputDisplayMode);
@@ -1943,6 +2278,25 @@ function removeDateRange() {
     showStatus(`−${count} word(s)`, 'success');
 }
 
+// Validate regex input in real-time
+function validateRegexInput() {
+    const input = document.getElementById('regexFilterInput');
+    const errorEl = document.getElementById('regexSyntaxError');
+    const pattern = input.value;
+    if (!pattern) {
+        errorEl.textContent = '';
+        return true;
+    }
+    try {
+        new RegExp(pattern, 'i');
+        errorEl.textContent = '';
+        return true;
+    } catch (e) {
+        errorEl.textContent = e.message.replace(/^.*:\s*/, '');
+        return false;
+    }
+}
+
 // Select by regex (add matching words to selection)
 function selectByRegex() {
     const pattern = document.getElementById('regexFilterInput').value.trim();
@@ -1951,24 +2305,22 @@ function selectByRegex() {
         return;
     }
 
-    try {
-        const regex = new RegExp(pattern, 'i');
-        let matchCount = 0;
+    if (!validateRegexInput()) return;
 
-        words.forEach((w, index) => {
-            if (regex.test(w.word) || regex.test(w.meaning)) {
-                selectedWords.add(index);
-                matchCount++;
-            }
-        });
+    const regex = new RegExp(pattern, 'i');
+    let matchCount = 0;
 
-        updateBatchToolbar();
-        updateWordSelectionUI();
-    
-        showStatus(`Matched ${matchCount} word(s)`, 'success');
-    } catch (e) {
-        showStatus('Invalid regex pattern', 'error');
-    }
+    words.forEach((w, index) => {
+        if (regex.test(w.word) || regex.test(w.meaning)) {
+            selectedWords.add(index);
+            matchCount++;
+        }
+    });
+
+    updateBatchToolbar();
+    updateWordSelectionUI();
+
+    showStatus(`Matched ${matchCount} word(s)`, 'success');
 }
 
 // Deselect by regex (remove matching words from selection)
@@ -1979,24 +2331,118 @@ function deselectByRegex() {
         return;
     }
 
-    try {
-        const regex = new RegExp(pattern, 'i');
-        let matchCount = 0;
+    if (!validateRegexInput()) return;
 
-        words.forEach((w, index) => {
-            if (regex.test(w.word) || regex.test(w.meaning)) {
+    const regex = new RegExp(pattern, 'i');
+    let matchCount = 0;
+
+    words.forEach((w, index) => {
+        if (regex.test(w.word) || regex.test(w.meaning)) {
+            selectedWords.delete(index);
+            matchCount++;
+        }
+    });
+
+    updateBatchToolbar();
+    updateWordSelectionUI();
+
+    showStatus(`Unmatched ${matchCount} word(s)`, 'success');
+}
+
+// Select by tag
+function selectByTag() {
+    const tagId = tagSelectorState.batchFilter;
+    if (!tagId) {
+        showStatus('Please select a tag', 'error');
+        return;
+    }
+
+    let count = 0;
+    words.forEach((w, index) => {
+        if ((w.tags || []).includes(tagId)) {
+            selectedWords.add(index);
+            count++;
+        }
+    });
+
+    updateBatchToolbar();
+    updateWordSelectionUI();
+    showStatus(`+${count} word(s)`, 'success');
+}
+
+// Deselect by tag
+function deselectByTag() {
+    const tagId = tagSelectorState.batchFilter;
+    if (!tagId) {
+        showStatus('Please select a tag', 'error');
+        return;
+    }
+
+    let count = 0;
+    words.forEach((w, index) => {
+        if ((w.tags || []).includes(tagId)) {
+            if (selectedWords.has(index)) {
                 selectedWords.delete(index);
-                matchCount++;
+                count++;
+            }
+        }
+    });
+
+    updateBatchToolbar();
+    updateWordSelectionUI();
+    showStatus(`−${count} word(s)`, 'success');
+}
+
+// Batch add tag to selected words
+async function batchAddTag() {
+    if (selectedWords.size === 0) return;
+    const tagIds = tagSelectorState.batchAction;
+    if (!tagIds || tagIds.length === 0) {
+        showStatus('Please select a tag', 'error');
+        return;
+    }
+
+    const count = selectedWords.size;
+    selectedWords.forEach(index => {
+        if (!words[index].tags) words[index].tags = [];
+        tagIds.forEach(tagId => {
+            if (!words[index].tags.includes(tagId)) {
+                words[index].tags.push(tagId);
             }
         });
+    });
 
-        updateBatchToolbar();
-        updateWordSelectionUI();
-    
-        showStatus(`Unmatched ${matchCount} word(s)`, 'success');
-    } catch (e) {
-        showStatus('Invalid regex pattern', 'error');
+    const names = tagIds.map(id => getTagName(id)).join(', ');
+    saveData(false, `+tag "${names}" × ${count}`);
+    renderWords();
+    showStatus(`Added tag to ${count} word(s)`, 'success');
+}
+
+// Batch remove tag from selected words
+async function batchRemoveTag() {
+    if (selectedWords.size === 0) return;
+    const tagIds = tagSelectorState.batchAction;
+    if (!tagIds || tagIds.length === 0) {
+        showStatus('Please select a tag', 'error');
+        return;
     }
+
+    let affected = 0;
+    selectedWords.forEach(index => {
+        if (!words[index].tags) return;
+        tagIds.forEach(tagId => {
+            const idx = words[index].tags.indexOf(tagId);
+            if (idx !== -1) {
+                words[index].tags.splice(idx, 1);
+                affected++;
+            }
+        });
+    });
+
+    const names = tagIds.map(id => getTagName(id)).join(', ');
+    saveData(false, `−tag "${names}" × ${affected}`);
+    renderWords();
+    showStatus(`Removed tag "${tag}" from ${affected} word(s)`, 'success');
 }
 
 // Batch adjust weight
@@ -2106,9 +2552,28 @@ async function batchDeleteConfirm() {
 
 // Detect iOS (used for pronunciation gesture workaround)
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let activePronunciationCount = 0;
+
+function isPronunciationBusy() {
+    const synthBusy = ('speechSynthesis' in window) && (speechSynthesis.speaking || speechSynthesis.pending);
+    return activePronunciationCount > 0 || synthBusy;
+}
+
+function beginPronunciationPlayback() {
+    activePronunciationCount += 1;
+}
+
+function endPronunciationPlayback() {
+    activePronunciationCount = Math.max(0, activePronunciationCount - 1);
+}
 
 // Pronunciation — uses preloaded audio cache for instant playback
 function pronounceWord(word) {
+    if (isPronunciationBusy()) {
+        showStatus('Pronunciation in progress', 'info');
+        return;
+    }
+
     const cached = audioCache.get(word);
 
     // If cache has a decoded buffer, play it instantly via AudioContext
@@ -2119,8 +2584,19 @@ function pronounceWord(word) {
             const source = ctx.createBufferSource();
             source.buffer = cached.buffer;
             source.connect(ctx.destination);
-            source.start(0);
-            source.onended = () => ctx.close();
+            beginPronunciationPlayback();
+            source.onended = () => {
+                endPronunciationPlayback();
+                ctx.close();
+            };
+            try {
+                source.start(0);
+            } catch (_) {
+                endPronunciationPlayback();
+                ctx.close();
+                pronounceSpeechSynthesis(word);
+                return;
+            }
             showStatus(`Playing "${word}"`, 'info');
             return;
         }
@@ -2129,9 +2605,15 @@ function pronounceWord(word) {
     // If cache has a URL but no buffer, use Audio element
     if (cached && cached.status === 'ready' && cached.url) {
         const audio = new Audio(cached.url);
+        beginPronunciationPlayback();
+        audio.onended = () => endPronunciationPlayback();
+        audio.onerror = () => endPronunciationPlayback();
         audio.play().then(() => {
             showStatus(`Playing "${word}"`, 'info');
-        }).catch(() => pronounceSpeechSynthesis(word));
+        }).catch(() => {
+            endPronunciationPlayback();
+            pronounceSpeechSynthesis(word);
+        });
         return;
     }
 
@@ -2184,12 +2666,26 @@ function pronounceWord(word) {
                         const source = audioCtx.createBufferSource();
                         source.buffer = decoded;
                         source.connect(audioCtx.destination);
-                        source.start(0);
-                        source.onended = () => audioCtx.close();
+                        beginPronunciationPlayback();
+                        source.onended = () => {
+                            endPronunciationPlayback();
+                            audioCtx.close();
+                        };
+                        try {
+                            source.start(0);
+                        } catch (_) {
+                            endPronunciationPlayback();
+                            audioCtx.close();
+                            pronounceSpeechSynthesis(word);
+                            return;
+                        }
                         showStatus(`Playing "${word}"`, 'info');
                     });
             } else {
                 const audio = new Audio(audioUrl);
+                beginPronunciationPlayback();
+                audio.onended = () => endPronunciationPlayback();
+                audio.onerror = () => endPronunciationPlayback();
                 return audio.play().then(() => {
                     showStatus(`Playing "${word}"`, 'info');
                 });
@@ -2205,6 +2701,10 @@ function pronounceWord(word) {
 function pronounceSpeechSynthesis(word) {
     if (!('speechSynthesis' in window)) {
         showStatus('Pronunciation not supported', 'error');
+        return;
+    }
+    if (speechSynthesis.speaking || speechSynthesis.pending) {
+        showStatus('Pronunciation in progress', 'info');
         return;
     }
 
@@ -2248,6 +2748,8 @@ function openEditModal(index) {
     document.getElementById('editWordInput').value = word.word;
     document.getElementById('editMeaningInput').value = word.meaning;
     document.getElementById('editDateInput').value = word.added;
+    tagSelectorState.edit = (word.tags || []).slice();
+    renderTagSelector('edit');
 
     // Set POS selection
     editSelectedPos = Array.isArray(word.pos) ? word.pos.slice() : (word.pos ? [word.pos] : []);
@@ -2276,6 +2778,7 @@ function saveEdit() {
     const meaning = document.getElementById('editMeaningInput').value.trim();
     const weight = editSelectedWeight;
     const date = document.getElementById('editDateInput').value;
+    const tags = tagSelectorState.edit.slice();
 
     if (!word) {
         alert('Please fill in word');
@@ -2289,7 +2792,8 @@ function saveEdit() {
         meaning: meaning,
         pos: editSelectedPos.slice(), // Copy array
         weight: weight,
-        added: date
+        added: date,
+        tags: tags
     };
 
     saveData(false, `✎　${oldWord}`);
@@ -2308,8 +2812,17 @@ document.getElementById('editModal').addEventListener('click', function(e) {
 function renderWords() {
     const container = document.getElementById('wordList');
 
-    // Show all words
+    // Update tag filter bar
+    renderTagFilterBar();
+
+    // Show all words, apply tag filter
     let filteredWords = words.filter(w => w.weight >= -3);
+    if (activeTagFilters.size > 0) {
+        filteredWords = filteredWords.filter(w => {
+            const wTags = w.tags || [];
+            return Array.from(activeTagFilters).some(t => wTags.includes(t));
+        });
+    }
 
     if (filteredWords.length === 0) {
         container.innerHTML = `
@@ -2322,38 +2835,65 @@ function renderWords() {
         return;
     }
 
-    // Group by weight
-    const groups = {};
-    filteredWords.forEach(w => {
-        if (!groups[w.weight]) {
-            groups[w.weight] = [];
-        }
-        groups[w.weight].push(w);
-    });
-
-    // Sort within groups
-    Object.keys(groups).forEach(weight => {
+    // Sort helper
+    function sortWordList(list) {
         if (wordSortMode === 'chrono') {
-            groups[weight].sort((a, b) => (a.added || '').localeCompare(b.added || ''));
+            list.sort((a, b) => (a.added || '').localeCompare(b.added || ''));
         } else if (wordSortMode === 'chrono-desc') {
-            groups[weight].sort((a, b) => (b.added || '').localeCompare(a.added || ''));
+            list.sort((a, b) => (b.added || '').localeCompare(a.added || ''));
         } else if (wordSortMode === 'alpha-desc') {
-            groups[weight].sort((a, b) => b.word.localeCompare(a.word));
+            list.sort((a, b) => b.word.localeCompare(a.word));
         } else {
-            groups[weight].sort((a, b) => a.word.localeCompare(b.word));
+            list.sort((a, b) => a.word.localeCompare(b.word));
         }
-    });
+    }
 
-    // Sort groups by weight
-    const sortedWeights = Object.keys(groups).map(Number).sort((a, b) => b - a);
+    let groupEntries; // Array of { label, words, collapsed }
+
+    if (wordGroupMode === 'tag') {
+        // Group by tag
+        const tagGroups = {};
+        const untagged = [];
+        filteredWords.forEach(w => {
+            const tags = w.tags || [];
+            if (tags.length === 0) {
+                untagged.push(w);
+            } else {
+                tags.forEach(t => {
+                    if (!tagGroups[t]) tagGroups[t] = [];
+                    tagGroups[t].push(w);
+                });
+            }
+        });
+        // Sort tag groups by name
+        const sortedTagIds = Object.keys(tagGroups).sort((a, b) => getTagName(a).localeCompare(getTagName(b)));
+        groupEntries = sortedTagIds.map(tagId => {
+            sortWordList(tagGroups[tagId]);
+            return { label: getTagName(tagId) || tagId, words: tagGroups[tagId], collapsed: false };
+        });
+        if (untagged.length > 0) {
+            sortWordList(untagged);
+            groupEntries.push({ label: 'Untagged', words: untagged, collapsed: true });
+        }
+    } else {
+        // Group by weight (default)
+        const groups = {};
+        filteredWords.forEach(w => {
+            if (!groups[w.weight]) groups[w.weight] = [];
+            groups[w.weight].push(w);
+        });
+        const sortedWeights = Object.keys(groups).map(Number).sort((a, b) => b - a);
+        groupEntries = sortedWeights.map(weight => {
+            sortWordList(groups[weight]);
+            const isNegative = weight < 0;
+            return { label: getWeightLabel(weight), words: groups[weight], collapsed: isNegative };
+        });
+    }
 
     let html = '';
-    sortedWeights.forEach(weight => {
-        const groupWords = groups[weight];
-        const isNegative = weight < 0;
-        const groupLabel = getWeightLabel(weight);
-        const expandedClass = isNegative ? '' : 'expanded';
-        const collapseIcon = isNegative ? '▼' : '▲';
+    groupEntries.forEach(({ label: groupLabel, words: groupWords, collapsed }) => {
+        const expandedClass = collapsed ? '' : 'expanded';
+        const collapseIcon = collapsed ? '▼' : '▲';
 
         html += `
             <div class="word-group">
@@ -2367,7 +2907,7 @@ function renderWords() {
         groupWords.forEach(w => {
             const originalIndex = words.indexOf(w);
             const isInvalid = w.weight === -3;
-            const masteredClass = (weight < 0 && !isInvalid) ? 'mastered' : '';
+            const masteredClass = (w.weight < 0 && !isInvalid) ? 'mastered' : '';
             const invalidClass = isInvalid ? 'invalid' : '';
             const weightText = isInvalid ? '!' : String(w.weight);
             const weightShapeClass = weightText.length > 1 ? 'is-wide' : '';
@@ -2378,6 +2918,11 @@ function renderWords() {
             const posArray = Array.isArray(w.pos) ? w.pos : (w.pos ? [w.pos] : []);
             const posTags = posArray.length > 0
                 ? posArray.map(p => `<span class="word-pos">${p}</span>`).join('')
+                : '';
+
+            const tagsArray = (Array.isArray(w.tags) ? w.tags : []).map(id => getTagName(id)).filter(n => n);
+            const tagBadges = tagsArray.length > 0
+                ? '<div class="word-tags">' + tagsArray.map(name => `<span class="word-tag">${name}</span>`).join('') + '</div>'
                 : '';
 
             html += `
@@ -2394,6 +2939,7 @@ function renderWords() {
                         <div class="word-weight ${weightShapeClass}">${weightDisplay}</div>
                     </div>
                     <div class="word-meaning"${hideMeaning ? ' style="visibility:hidden;height:0;margin:0;overflow:hidden;"' : ''}>${w.meaning}</div>
+                    ${tagBadges}
                     <div class="word-meta">Added: ${formatAddedDateLabel(w.added)}</div>
                     ${!isSelectMode ? `<div class="word-actions">
                         ${w.weight >= 0 ? `<button class="btn-remember" onclick="updateWeight(${originalIndex}, -1)">Down</button>` : ''}
@@ -2464,7 +3010,8 @@ function exportDataOnly() {
     const projectId = getProjectId();
     const exportObj = {
         projectId,
-        words: words
+        words: words,
+        tagRegistry: tagRegistry
     };
     const dataStr = JSON.stringify(exportObj, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
@@ -2488,6 +3035,7 @@ function exportWithVersionHistory() {
     const exportData = {
         projectId,
         words: words,
+        tagRegistry: tagRegistry,
         versionHistory: {
             format: 'tree-v2',
             versions: Object.fromEntries(versionControl.versions),
@@ -2609,9 +3157,17 @@ function processImportedWords(imported) {
 }
 
 // Import words only (clear version history)
-function importWordsOnly(wordsData) {
+function importWordsOnly(wordsData, importedTagRegistry) {
     const { processed, validCount, invalidCount } = processImportedWords(wordsData);
     words = processed;
+
+    if (importedTagRegistry && Array.isArray(importedTagRegistry)) {
+        tagRegistry = importedTagRegistry;
+    } else {
+        tagRegistry = [];
+        migrateStringTagsToRegistry();
+    }
+    saveTagRegistry();
 
     // Clear version history and create new initial version
     if (versionControl) {
@@ -2629,9 +3185,18 @@ function importWordsOnly(wordsData) {
 }
 
 // Import as overwrite: use imported data, create a new branch in registry-tree
-function importAsOverwrite(wordsData, description) {
+function importAsOverwrite(wordsData, description, importedTagRegistry) {
     const { processed } = processImportedWords(wordsData);
     words = processed;
+
+    if (importedTagRegistry && Array.isArray(importedTagRegistry)) {
+        tagRegistry = importedTagRegistry;
+    } else {
+        tagRegistry = [];
+        migrateStringTagsToRegistry();
+    }
+    saveTagRegistry();
+
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
 
     // Create a new version branching from current
@@ -2661,6 +3226,14 @@ function importWithVersionHistory(importedData) {
         words = processed;
     }
 
+    if (importedData.tagRegistry && Array.isArray(importedData.tagRegistry)) {
+        tagRegistry = importedData.tagRegistry;
+    } else {
+        tagRegistry = [];
+        migrateStringTagsToRegistry();
+    }
+    saveTagRegistry();
+
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
     renderWords();
 
@@ -2685,6 +3258,14 @@ function importReplaceWithVersionHistory(importedData) {
     } else {
         words = processed;
     }
+
+    if (importedData.tagRegistry && Array.isArray(importedData.tagRegistry)) {
+        tagRegistry = importedData.tagRegistry;
+    } else {
+        tagRegistry = [];
+        migrateStringTagsToRegistry();
+    }
+    saveTagRegistry();
 
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
     renderWords();
@@ -2734,7 +3315,7 @@ async function importDataFromFile(file) {
                     cancelText: 'Cancel'
                 });
                 if (shouldContinueImport) {
-                    importWordsOnly(imported.words || imported);
+                    importWordsOnly(imported.words || imported, imported.tagRegistry);
                 }
                 return;
             }
@@ -2772,7 +3353,7 @@ async function importDataFromFile(file) {
                 cancelText: 'Cancel'
             });
             if (shouldOverwrite) {
-                importAsOverwrite(imported.words, `Import fork (${imported.words.length} words)`);
+                importAsOverwrite(imported.words, `Import fork (${imported.words.length} words)`, imported.tagRegistry);
             }
         } else {
             showStatus('Invalid file format', 'error');
@@ -2952,6 +3533,9 @@ document.addEventListener('keydown', function(e) {
 });
 
 // Settings functions
+let _settingsDirty = false;
+let _settingsSnapshot = null;
+
 function openSettingsModal() {
     if (!versionControl) return;
 
@@ -2966,11 +3550,148 @@ function openSettingsModal() {
     if (audioPreloadEnabledInput) {
         audioPreloadEnabledInput.checked = appSettings.audioPreloadEnabled;
     }
+    renderTagManager();
+
+    // Reset dirty tracking
+    _settingsDirty = false;
+    _settingsSnapshot = {
+        maxVersions: String(settings.maxVersions),
+        projectId: getProjectId(),
+        actionSoundEnabled: appSettings.actionSoundEnabled,
+        audioPreloadEnabled: appSettings.audioPreloadEnabled
+    };
+
     document.getElementById('settingsModal').classList.add('active');
 }
 
 function closeSettingsModal() {
     document.getElementById('settingsModal').classList.remove('active');
+    _settingsDirty = false;
+    _settingsSnapshot = null;
+}
+
+function isSettingsDirty() {
+    if (_settingsDirty) return true;
+    if (!_settingsSnapshot) return false;
+    const maxVersionsEl = document.getElementById('maxVersionsInput');
+    const projectIdEl = document.getElementById('projectIdInput');
+    const actionSoundEl = document.getElementById('actionSoundEnabledInput');
+    const audioPreloadEl = document.getElementById('audioPreloadEnabledInput');
+    if (maxVersionsEl && maxVersionsEl.value !== _settingsSnapshot.maxVersions) return true;
+    if (projectIdEl && projectIdEl.value !== _settingsSnapshot.projectId) return true;
+    if (actionSoundEl && actionSoundEl.checked !== _settingsSnapshot.actionSoundEnabled) return true;
+    if (audioPreloadEl && audioPreloadEl.checked !== _settingsSnapshot.audioPreloadEnabled) return true;
+    return false;
+}
+
+async function cancelSettings() {
+    if (isSettingsDirty()) {
+        const shouldDiscard = await showInPageConfirm({
+            title: 'Discard Changes',
+            message: 'Settings have been modified. Discard changes?',
+            confirmText: 'Discard',
+            cancelText: 'Keep Editing',
+            confirmTone: 'danger'
+        });
+        if (!shouldDiscard) return;
+    }
+    closeSettingsModal();
+}
+
+// --- Tag Manager (Settings) ---
+
+function renderTagManager() {
+    const container = document.getElementById('tagManagerList');
+    if (!container) return;
+
+    if (tagRegistry.length === 0) {
+        container.innerHTML = '<div class="tag-manager-empty">No tags yet.</div>';
+        return;
+    }
+
+    // Count usage per tag
+    const usageCount = {};
+    tagRegistry.forEach(t => usageCount[t.id] = 0);
+    words.forEach(w => {
+        if (w.tags) w.tags.forEach(id => {
+            if (usageCount[id] !== undefined) usageCount[id]++;
+        });
+    });
+
+    container.innerHTML = tagRegistry.map(t => `
+        <div class="tag-manager-item" data-tag-id="${t.id}">
+            <input type="text" value="${t.name.replace(/"/g, '&quot;')}" onchange="tagManagerRename('${t.id}', this.value)">
+            <span class="tag-manager-count">${usageCount[t.id] || 0} words</span>
+            <button class="btn-danger" onclick="tagManagerDelete('${t.id}')">Delete</button>
+        </div>
+    `).join('');
+}
+
+function tagManagerAdd() {
+    const input = document.getElementById('tagManagerNewInput');
+    if (!input) return;
+    const name = input.value.trim();
+    if (!name) return;
+
+    // Check duplicate
+    if (getTagId(name)) {
+        alert('Tag "' + name + '" already exists.');
+        return;
+    }
+
+    createTag(name);
+    input.value = '';
+    renderTagManager();
+    renderTagFilterBar();
+    _settingsDirty = true;
+}
+
+function tagManagerRename(id, newName) {
+    newName = newName.trim();
+    if (!newName) {
+        alert('Tag name cannot be empty.');
+        renderTagManager();
+        return;
+    }
+
+    // Check duplicate (different id, same name)
+    const existing = getTagId(newName);
+    if (existing && existing !== id) {
+        alert('Tag "' + newName + '" already exists.');
+        renderTagManager();
+        return;
+    }
+
+    renameTag(id, newName);
+    renderTagManager();
+    renderTagFilterBar();
+    _settingsDirty = true;
+}
+
+async function tagManagerDelete(id) {
+    const tag = tagRegistry.find(t => t.id === id);
+    if (!tag) return;
+
+    const count = words.filter(w => w.tags && w.tags.includes(id)).length;
+    const msg = count > 0
+        ? `Delete tag "${tag.name}"? It will be removed from ${count} word(s).`
+        : `Delete tag "${tag.name}"?`;
+
+    const shouldDelete = await showInPageConfirm({
+        title: 'Delete Tag',
+        message: msg,
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        confirmTone: 'danger'
+    });
+    if (!shouldDelete) return;
+
+    deleteTag(id);
+    saveData();
+    playActionSound('delete');
+    renderTagManager();
+    renderTagFilterBar();
+    _settingsDirty = true;
 }
 
 function saveSettings() {
@@ -3011,6 +3732,8 @@ function saveSettings() {
     });
     saveAppSettings();
     applyAudioPreloadSetting();
+    enforceGroupModeByTagAvailability();
+    renderWords();
 
     if (!appSettings.actionSoundEnabled) {
         deleteActionSoundAudio = null;
@@ -3069,6 +3792,7 @@ async function clearAllData() {
 
     // Reset in-memory state
     words = [];
+    tagRegistry = [];
     if (versionControl) {
         versionControl.versions = new Map();
         versionControl.rootId = null;
@@ -3941,7 +4665,7 @@ function goToVersionById(versionId) {
 // Close modals on background click
 document.getElementById('settingsModal').addEventListener('click', function(e) {
     if (e.target === this) {
-        closeSettingsModal();
+        cancelSettings();
     }
 });
 

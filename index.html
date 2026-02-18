@@ -43,6 +43,21 @@
                         <label>Meaning</label>
                         <input type="text" id="meaningInput">
                     </div>
+                    <div class="form-row">
+                        <label>Tags</label>
+                        <div class="dropdown-container tag-selector" id="tagSelector">
+                            <div class="dropdown-selected tag-selected" id="tagSelected">
+                                <span class="tag-placeholder">Tags</span>
+                            </div>
+                            <div class="dropdown-menu tag-dropdown" id="tagDropdown">
+                                <div class="tag-input-row">
+                                    <input type="text" id="tagNewInput" class="tag-new-input" placeholder="New tag…" autocomplete="off">
+                                    <button class="tag-add-btn" onclick="addNewTagFromInput(event)">+</button>
+                                </div>
+                                <div id="tagOptionsList" class="tag-options-list"></div>
+                            </div>
+                        </div>
+                    </div>
                     <div class="form-grid-3">
                         <div class="form-row">
                             <label>POS</label>
@@ -94,9 +109,13 @@
                     <button class="btn-secondary" onclick="document.getElementById('importFile').click()">Import</button>
                     <button class="btn-secondary" id="selectModeBtn" onclick="toggleSelectMode()">Select Words</button>
                     <button class="btn-secondary" id="sortModeBtn" onclick="toggleSortMode()">A-Z</button>
+                    <button class="btn-secondary" id="groupModeBtn" onclick="toggleGroupMode()">By Weight</button>
                     <button class="btn-secondary" onclick="openSettingsModal()">Settings</button>
                     <input type="file" id="importFile" accept=".json" onchange="importData(event)">
                 </div>
+
+                <!-- Tag Filter Bar -->
+                <div class="tag-filter-bar" id="tagFilterBar"></div>
 
                 <!-- Batch Operations Toolbar (hidden by default) -->
                 <div id="batchToolbar" class="batch-toolbar">
@@ -135,9 +154,25 @@
                     <div class="batch-toolbar-section">
                         <div class="batch-toolbar-label">Regex:</div>
                         <div class="batch-toolbar-controls">
-                            <input type="text" id="regexFilterInput" class="regex-input" placeholder="e.g. ^un.*ing$">
+                            <input type="text" id="regexFilterInput" class="regex-input" placeholder="e.g. ^un.*ing$" oninput="validateRegexInput()">
                             <button class="btn-batch btn-batch-add" onclick="selectByRegex()">+</button>
                             <button class="btn-batch btn-batch-remove" onclick="deselectByRegex()">−</button>
+                            <div id="regexSyntaxError" class="regex-syntax-error"></div>
+                        </div>
+                    </div>
+                    <div class="batch-toolbar-section">
+                        <div class="batch-toolbar-label">Tag:</div>
+                        <div class="batch-toolbar-controls">
+                            <div class="dropdown-container tag-selector batch-tag-selector" id="batchTagFilterSelector">
+                                <div class="dropdown-selected tag-selected batch-tag-filter-selected" id="batchTagFilterSelected">
+                                    <span class="tag-placeholder">Tag</span>
+                                </div>
+                                <div class="dropdown-menu tag-dropdown" id="batchTagFilterDropdown">
+                                    <div id="batchTagFilterOptionsList" class="tag-options-list"></div>
+                                </div>
+                            </div>
+                            <button class="btn-batch btn-batch-add" onclick="selectByTag()">+</button>
+                            <button class="btn-batch btn-batch-remove" onclick="deselectByTag()">−</button>
                         </div>
                     </div>
                     <div class="batch-toolbar-section batch-toolbar-section-actions">
@@ -149,6 +184,22 @@
                             <div class="batch-actions-date-row">
                                 <input type="date" id="batchDateInput" class="range-input-date batch-set-date-input">
                                 <button class="btn-batch" onclick="batchSetDate()" id="batchSetDateBtn" disabled>Set Date</button>
+                            </div>
+                            <div class="batch-actions-date-row">
+                                <div class="dropdown-container tag-selector batch-tag-selector" id="batchTagActionSelector" style="flex:1 1 0;min-width:0;">
+                                    <div class="dropdown-selected tag-selected batch-tag-filter-selected" id="batchTagActionSelected">
+                                        <span class="tag-placeholder">Tag</span>
+                                    </div>
+                                    <div class="dropdown-menu tag-dropdown" id="batchTagActionDropdown">
+                                        <div class="tag-input-row">
+                                            <input type="text" id="batchTagActionNewInput" class="tag-new-input" placeholder="New tag…" autocomplete="off">
+                                            <button class="tag-add-btn" onclick="addBatchTagActionFromInput(event)">+</button>
+                                        </div>
+                                        <div id="batchTagActionOptionsList" class="tag-options-list"></div>
+                                    </div>
+                                </div>
+                                <button class="btn-batch" onclick="batchAddTag()" id="batchAddTagBtn" disabled>+Tag</button>
+                                <button class="btn-batch" onclick="batchRemoveTag()" id="batchRemoveTagBtn" disabled>−Tag</button>
                             </div>
                         </div>
                     </div>
@@ -185,6 +236,21 @@
             <div class="form-row">
                 <label>Meaning</label>
                 <input type="text" id="editMeaningInput">
+            </div>
+            <div class="form-row">
+                <label>Tags</label>
+                <div class="dropdown-container tag-selector" id="editTagSelector">
+                    <div class="dropdown-selected tag-selected" id="editTagSelected">
+                        <span class="tag-placeholder">Tags</span>
+                    </div>
+                    <div class="dropdown-menu tag-dropdown" id="editTagDropdown">
+                        <div class="tag-input-row">
+                            <input type="text" id="editTagNewInput" class="tag-new-input" placeholder="New tag…" autocomplete="off">
+                            <button class="tag-add-btn" onclick="addNewEditTagFromInput(event)">+</button>
+                        </div>
+                        <div id="editTagOptionsList" class="tag-options-list"></div>
+                    </div>
+                </div>
             </div>
             <div class="form-grid-3">
                 <div class="form-row">
@@ -283,6 +349,15 @@
                 </div>
             </div>
 
+            <div class="form-row">
+                <label>Tags</label>
+                <div id="tagManagerList" class="tag-manager-list"></div>
+                <div class="tag-manager-add-row">
+                    <input type="text" id="tagManagerNewInput" placeholder="New tag…">
+                    <button class="btn-secondary" onclick="tagManagerAdd()">Add</button>
+                </div>
+            </div>
+
             <div class="form-row danger-zone">
                 <label>Danger Zone</label>
                 <div class="settings-inline-actions">
@@ -293,7 +368,7 @@
         </div>
         <div class="modal-actions">
             <button class="btn-primary" onclick="saveSettings()">Save</button>
-            <button class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
+            <button class="btn-secondary" onclick="cancelSettings()">Cancel</button>
         </div>
     </div>
 
