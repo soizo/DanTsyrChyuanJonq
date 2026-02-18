@@ -257,6 +257,7 @@ class VersionControl {
         }
 
         this.saveHistory();
+        updateHistoryButtonLabel(this.versions.size);
         return newVersion;
     }
 
@@ -593,7 +594,8 @@ const PROJECT_ID_KEY = 'wordMemoryProjectId';
 const APP_SETTINGS_KEY = 'wordMemoryAppSettings';
 const DEFAULT_APP_SETTINGS = {
     actionSoundEnabled: true,
-    audioPreloadEnabled: true
+    audioPreloadEnabled: true,
+    pronounceVolume: 1
 };
 
 function createProjectId() {
@@ -635,11 +637,29 @@ function sanitizeAppSettings(rawSettings) {
     const audioPreloadEnabled = typeof parsed.audioPreloadEnabled === 'boolean'
         ? parsed.audioPreloadEnabled
         : DEFAULT_APP_SETTINGS.audioPreloadEnabled;
+    const parsedVolume = Number(parsed.pronounceVolume);
+    const pronounceVolume = Number.isFinite(parsedVolume)
+        ? Math.max(0, Math.min(1, parsedVolume))
+        : DEFAULT_APP_SETTINGS.pronounceVolume;
 
     return {
         actionSoundEnabled,
-        audioPreloadEnabled
+        audioPreloadEnabled,
+        pronounceVolume
     };
+}
+
+function getPronounceVolumePercent() {
+    return Math.round((appSettings.pronounceVolume || 0) * 100);
+}
+
+function updatePronounceVolumePreview(value = null) {
+    const input = document.getElementById('pronounceVolumeInput');
+    const valueEl = document.getElementById('pronounceVolumeValue');
+    if (!input || !valueEl) return;
+    const rawValue = value === null ? input.value : value;
+    const percent = Number.isFinite(Number(rawValue)) ? Math.max(0, Math.min(100, Math.round(Number(rawValue)))) : 100;
+    valueEl.textContent = `${percent}%`;
 }
 
 function loadAppSettings() {
@@ -672,6 +692,7 @@ let versionControl = null;
 let wordSortMode = 'alpha'; // 'alpha', 'alpha-desc', 'chrono', 'chrono-desc'
 let wordGroupMode = 'weight'; // 'weight', 'tag'
 let activeTagFilters = new Set(); // tags selected for filtering display
+let excludedTagFilters = new Set(); // tags excluded from display
 let cachedVoices = [];
 let appSettings = sanitizeAppSettings(null);
 
@@ -1322,6 +1343,7 @@ window.onload = function() {
     } else if (versionControl.versions.size === 0 && words.length === 0) {
         versionControl.createVersion([], 'Initial empty state');
     }
+    updateHistoryButtonLabel();
 
     if (appSettings.actionSoundEnabled) {
         deleteActionSoundAudio = new Audio('assets/delete.mp3');
@@ -1698,8 +1720,9 @@ function deleteTag(id) {
     words.forEach(w => {
         if (w.tags) w.tags = w.tags.filter(t => t !== id);
     });
-    // Remove from active filters
+    // Remove from active/excluded filters
     activeTagFilters.delete(id);
+    excludedTagFilters.delete(id);
     saveTagRegistry();
     saveData(false, `Delete tag`);
 }
@@ -1876,14 +1899,17 @@ function renderTagFilterBar() {
         return;
     }
     bar.innerHTML = tagRegistry.map(tag => {
-        const isActive = activeTagFilters.has(tag.id) ? 'active' : '';
-        return `<span class="tag-filter-chip ${isActive}" onclick="toggleTagFilter('${tag.id}')">${tag.name}</span>`;
+        const state = activeTagFilters.has(tag.id) ? 'active' : excludedTagFilters.has(tag.id) ? 'excluded' : '';
+        return `<span class="tag-filter-chip ${state}" onclick="toggleTagFilter('${tag.id}')">${tag.name}</span>`;
     }).join('');
 }
 
 function toggleTagFilter(tag) {
     if (activeTagFilters.has(tag)) {
         activeTagFilters.delete(tag);
+        excludedTagFilters.add(tag);
+    } else if (excludedTagFilters.has(tag)) {
+        excludedTagFilters.delete(tag);
     } else {
         activeTagFilters.add(tag);
     }
@@ -1898,7 +1924,7 @@ function enforceGroupModeByTagAvailability() {
 
     const btn = document.getElementById('groupModeBtn');
     if (btn) {
-        btn.textContent = wordGroupMode === 'tag' ? 'By Tag' : 'By Weight';
+        btn.textContent = wordGroupMode === 'tag' ? 'Tag Grouping' : 'Weight Grouping';
     }
 }
 
@@ -1960,6 +1986,7 @@ function addWord() {
         pos: selectedPos.slice(), // Copy array
         weight: weight,
         added: date,
+        joinedAt: new Date().toISOString().slice(0, 19),
         tags: tags
     };
 
@@ -2038,8 +2065,8 @@ function toggleWordSelection(index) {
 
 // Toggle sort mode
 function toggleSortMode() {
-    const modes = ['alpha', 'alpha-desc', 'chrono', 'chrono-desc'];
-    const labels = ['A-Z', 'Z-A', 'Date↑', 'Date↓'];
+    const modes = ['alpha', 'alpha-desc', 'chrono', 'chrono-desc', 'join', 'join-desc'];
+    const labels = ['A-Z', 'Z-A', 'Date↑', 'Date↓', 'Join↑', 'Join↓'];
     const idx = modes.indexOf(wordSortMode);
     wordSortMode = modes[(idx + 1) % modes.length];
     const btn = document.getElementById('sortModeBtn');
@@ -2552,27 +2579,25 @@ async function batchDeleteConfirm() {
 
 // Detect iOS (used for pronunciation gesture workaround)
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-let activePronunciationCount = 0;
+let pronunciationRequestId = 0;
+let activePronunciationStop = null;
 
-function isPronunciationBusy() {
-    const synthBusy = ('speechSynthesis' in window) && (speechSynthesis.speaking || speechSynthesis.pending);
-    return activePronunciationCount > 0 || synthBusy;
-}
-
-function beginPronunciationPlayback() {
-    activePronunciationCount += 1;
-}
-
-function endPronunciationPlayback() {
-    activePronunciationCount = Math.max(0, activePronunciationCount - 1);
+function interruptCurrentPronunciation() {
+    if (activePronunciationStop) {
+        try {
+            activePronunciationStop();
+        } catch (_) {}
+        activePronunciationStop = null;
+    }
+    if ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending)) {
+        speechSynthesis.cancel();
+    }
 }
 
 // Pronunciation — uses preloaded audio cache for instant playback
 function pronounceWord(word) {
-    if (isPronunciationBusy()) {
-        showStatus('Pronunciation in progress', 'info');
-        return;
-    }
+    const requestId = ++pronunciationRequestId;
+    interruptCurrentPronunciation();
 
     const cached = audioCache.get(word);
 
@@ -2583,18 +2608,26 @@ function pronounceWord(word) {
             const ctx = new AudioCtx();
             const source = ctx.createBufferSource();
             source.buffer = cached.buffer;
-            source.connect(ctx.destination);
-            beginPronunciationPlayback();
+            const gainNode = ctx.createGain();
+            gainNode.gain.value = appSettings.pronounceVolume;
+            source.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            const stopPlayback = () => {
+                source.onended = null;
+                try { source.stop(0); } catch (_) {}
+                ctx.close().catch(() => {});
+            };
+            activePronunciationStop = stopPlayback;
             source.onended = () => {
-                endPronunciationPlayback();
-                ctx.close();
+                if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+                ctx.close().catch(() => {});
             };
             try {
                 source.start(0);
             } catch (_) {
-                endPronunciationPlayback();
-                ctx.close();
-                pronounceSpeechSynthesis(word);
+                if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+                ctx.close().catch(() => {});
+                pronounceSpeechSynthesis(word, requestId);
                 return;
             }
             showStatus(`Playing "${word}"`, 'info');
@@ -2605,14 +2638,25 @@ function pronounceWord(word) {
     // If cache has a URL but no buffer, use Audio element
     if (cached && cached.status === 'ready' && cached.url) {
         const audio = new Audio(cached.url);
-        beginPronunciationPlayback();
-        audio.onended = () => endPronunciationPlayback();
-        audio.onerror = () => endPronunciationPlayback();
+        audio.volume = appSettings.pronounceVolume;
+        const stopPlayback = () => {
+            audio.onended = null;
+            audio.onerror = null;
+            audio.pause();
+            audio.currentTime = 0;
+        };
+        activePronunciationStop = stopPlayback;
+        audio.onended = () => {
+            if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+        };
+        audio.onerror = () => {
+            if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+        };
         audio.play().then(() => {
             showStatus(`Playing "${word}"`, 'info');
         }).catch(() => {
-            endPronunciationPlayback();
-            pronounceSpeechSynthesis(word);
+            if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+            pronounceSpeechSynthesis(word, requestId);
         });
         return;
     }
@@ -2622,11 +2666,12 @@ function pronounceWord(word) {
     // loses gesture context, so speechSynthesis would silently fail.
     // On iOS, speak synchronously NOW, then fetch audio in background for next time.
     if (isIOS) {
-        pronounceSpeechSynthesis(word);
+        pronounceSpeechSynthesis(word, requestId);
         // Cache audio in background for future clicks (will hit the cached paths above)
         fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(word)}`)
             .then(r => r.ok ? r.json() : null)
             .then(data => {
+                if (requestId !== pronunciationRequestId) return;
                 if (!data) return;
                 const audioUrl = data[0]?.phonetics?.find(p => p.audio)?.audio;
                 if (audioUrl) {
@@ -2648,6 +2693,10 @@ function pronounceWord(word) {
             return response.json();
         })
         .then(data => {
+            if (requestId !== pronunciationRequestId) {
+                if (audioCtx) audioCtx.close().catch(() => {});
+                return;
+            }
             const audioUrl = data[0]?.phonetics?.find(p => p.audio)?.audio;
             if (!audioUrl) throw new Error('No audio URL');
 
@@ -2660,32 +2709,55 @@ function pronounceWord(word) {
                     .then(r => r.arrayBuffer())
                     .then(buf => audioCtx.decodeAudioData(buf))
                     .then(decoded => {
+                        if (requestId !== pronunciationRequestId) {
+                            audioCtx.close().catch(() => {});
+                            return;
+                        }
                         // Cache the decoded buffer
                         const entry = audioCache.get(word);
                         if (entry) entry.buffer = decoded;
                         const source = audioCtx.createBufferSource();
                         source.buffer = decoded;
-                        source.connect(audioCtx.destination);
-                        beginPronunciationPlayback();
+                        const gainNode = audioCtx.createGain();
+                        gainNode.gain.value = appSettings.pronounceVolume;
+                        source.connect(gainNode);
+                        gainNode.connect(audioCtx.destination);
+                        const stopPlayback = () => {
+                            source.onended = null;
+                            try { source.stop(0); } catch (_) {}
+                            audioCtx.close().catch(() => {});
+                        };
+                        activePronunciationStop = stopPlayback;
                         source.onended = () => {
-                            endPronunciationPlayback();
-                            audioCtx.close();
+                            if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+                            audioCtx.close().catch(() => {});
                         };
                         try {
                             source.start(0);
                         } catch (_) {
-                            endPronunciationPlayback();
-                            audioCtx.close();
-                            pronounceSpeechSynthesis(word);
+                            if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+                            audioCtx.close().catch(() => {});
+                            pronounceSpeechSynthesis(word, requestId);
                             return;
                         }
                         showStatus(`Playing "${word}"`, 'info');
                     });
             } else {
                 const audio = new Audio(audioUrl);
-                beginPronunciationPlayback();
-                audio.onended = () => endPronunciationPlayback();
-                audio.onerror = () => endPronunciationPlayback();
+                audio.volume = appSettings.pronounceVolume;
+                const stopPlayback = () => {
+                    audio.onended = null;
+                    audio.onerror = null;
+                    audio.pause();
+                    audio.currentTime = 0;
+                };
+                activePronunciationStop = stopPlayback;
+                audio.onended = () => {
+                    if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+                };
+                audio.onerror = () => {
+                    if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+                };
                 return audio.play().then(() => {
                     showStatus(`Playing "${word}"`, 'info');
                 });
@@ -2693,24 +2765,23 @@ function pronounceWord(word) {
         })
         .catch(() => {
             if (audioCtx) audioCtx.close().catch(() => {});
-            pronounceSpeechSynthesis(word);
+            pronounceSpeechSynthesis(word, requestId);
         });
 }
 
 // Speech synthesis pronunciation — called synchronously from user gesture on iOS
-function pronounceSpeechSynthesis(word) {
+function pronounceSpeechSynthesis(word, requestId = pronunciationRequestId) {
+    if (requestId !== pronunciationRequestId) return;
     if (!('speechSynthesis' in window)) {
         showStatus('Pronunciation not supported', 'error');
         return;
     }
-    if (speechSynthesis.speaking || speechSynthesis.pending) {
-        showStatus('Pronunciation in progress', 'info');
-        return;
-    }
+    speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(word);
     utterance.lang = 'en-GB';
     utterance.rate = 0.8;
+    utterance.volume = appSettings.pronounceVolume;
 
     // Use cached voices (populated via voiceschanged), fallback to fresh call
     const voices = cachedVoices.length > 0 ? cachedVoices : speechSynthesis.getVoices();
@@ -2727,9 +2798,18 @@ function pronounceSpeechSynthesis(word) {
         }, 5000);
     };
     const cleanup = () => { if (iosResumeTimer) { clearInterval(iosResumeTimer); iosResumeTimer = null; } };
-    utterance.onend = cleanup;
+    const stopPlayback = () => {
+        cleanup();
+        speechSynthesis.cancel();
+    };
+    activePronunciationStop = stopPlayback;
+    utterance.onend = () => {
+        cleanup();
+        if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
+    };
     utterance.onerror = (e) => {
         cleanup();
+        if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
         // 'interrupted' is normal (user clicked again), only log real errors
         if (e.error !== 'interrupted') {
             showStatus('Pronunciation failed', 'error');
@@ -2770,6 +2850,38 @@ function closeEditModal() {
     document.getElementById('editModal').classList.remove('active');
 }
 
+function bindModalBackdropPressReleaseClose(modal, onClose) {
+    if (!modal || typeof onClose !== 'function') return;
+
+    let pressedOnBackdrop = false;
+    let pressedPointerId = null;
+
+    function resetPressedState() {
+        pressedOnBackdrop = false;
+        pressedPointerId = null;
+    }
+
+    modal.addEventListener('pointerdown', function(e) {
+        if (e.target === modal) {
+            pressedOnBackdrop = true;
+            pressedPointerId = e.pointerId;
+            return;
+        }
+        resetPressedState();
+    });
+
+    modal.addEventListener('pointerup', function(e) {
+        const releasedOnBackdrop = e.target === modal;
+        const samePointer = pressedPointerId === e.pointerId;
+        if (pressedOnBackdrop && releasedOnBackdrop && samePointer) {
+            onClose();
+        }
+        resetPressedState();
+    });
+
+    modal.addEventListener('pointercancel', resetPressedState);
+}
+
 // Save edit
 function saveEdit() {
     if (editingIndex === -1) return;
@@ -2793,6 +2905,7 @@ function saveEdit() {
         pos: editSelectedPos.slice(), // Copy array
         weight: weight,
         added: date,
+        joinedAt: words[editingIndex].joinedAt,
         tags: tags
     };
 
@@ -2801,12 +2914,10 @@ function saveEdit() {
     closeEditModal();
 }
 
-// Close modal on background click
-document.getElementById('editModal').addEventListener('click', function(e) {
-    if (e.target === this) {
-        closeEditModal();
-    }
-});
+bindModalBackdropPressReleaseClose(
+    document.getElementById('editModal'),
+    closeEditModal
+);
 
 // Render words
 function renderWords() {
@@ -2821,6 +2932,12 @@ function renderWords() {
         filteredWords = filteredWords.filter(w => {
             const wTags = w.tags || [];
             return Array.from(activeTagFilters).some(t => wTags.includes(t));
+        });
+    }
+    if (excludedTagFilters.size > 0) {
+        filteredWords = filteredWords.filter(w => {
+            const wTags = w.tags || [];
+            return !Array.from(excludedTagFilters).some(t => wTags.includes(t));
         });
     }
 
@@ -2841,6 +2958,18 @@ function renderWords() {
             list.sort((a, b) => (a.added || '').localeCompare(b.added || ''));
         } else if (wordSortMode === 'chrono-desc') {
             list.sort((a, b) => (b.added || '').localeCompare(a.added || ''));
+        } else if (wordSortMode === 'join') {
+            list.sort((a, b) => {
+                const ja = a.joinedAt || ((a.added || '') + 'T00:00:00');
+                const jb = b.joinedAt || ((b.added || '') + 'T00:00:00');
+                return ja.localeCompare(jb);
+            });
+        } else if (wordSortMode === 'join-desc') {
+            list.sort((a, b) => {
+                const ja = a.joinedAt || ((a.added || '') + 'T00:00:00');
+                const jb = b.joinedAt || ((b.added || '') + 'T00:00:00');
+                return jb.localeCompare(ja);
+            });
         } else if (wordSortMode === 'alpha-desc') {
             list.sort((a, b) => b.word.localeCompare(a.word));
         } else {
@@ -2940,7 +3069,7 @@ function renderWords() {
                     </div>
                     <div class="word-meaning"${hideMeaning ? ' style="visibility:hidden;height:0;margin:0;overflow:hidden;"' : ''}>${w.meaning}</div>
                     ${tagBadges}
-                    <div class="word-meta">Added: ${formatAddedDateLabel(w.added)}</div>
+                    <div class="word-meta">Date: ${formatAddedDateLabel(w.added)}</div>
                     ${!isSelectMode ? `<div class="word-actions">
                         ${w.weight >= 0 ? `<button class="btn-remember" onclick="updateWeight(${originalIndex}, -1)">Down</button>` : ''}
                         ${w.weight >= -1 && w.weight < 10 ? `<button class="btn-forget" onclick="updateWeight(${originalIndex}, 1)">Up</button>` : ''}
@@ -3024,15 +3153,11 @@ function exportDataOnly() {
     showStatus('Exported data only', 'success');
 }
 
-// Export data with complete version history
-function exportWithVersionHistory() {
-    if (!versionControl) {
-        showStatus('Version control not initialized', 'error');
-        return;
-    }
+function buildFullExportData() {
+    if (!versionControl) return null;
 
     const projectId = getProjectId();
-    const exportData = {
+    return {
         projectId,
         words: words,
         tagRegistry: tagRegistry,
@@ -3044,7 +3169,17 @@ function exportWithVersionHistory() {
             exportDate: new Date().toISOString()
         }
     };
+}
 
+// Export data with complete version history
+function exportWithVersionHistory() {
+    const exportData = buildFullExportData();
+    if (!exportData) {
+        showStatus('Version control not initialized', 'error');
+        return;
+    }
+
+    const projectId = getProjectId();
     const dataStr = JSON.stringify(exportData, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -3054,6 +3189,21 @@ function exportWithVersionHistory() {
     a.click();
     URL.revokeObjectURL(url);
     showStatus('Exported data with version history', 'success');
+}
+
+function viewCurrentFullRawFile() {
+    const exportData = buildFullExportData();
+    if (!exportData) {
+        showStatus('Version control not initialized', 'error');
+        return;
+    }
+
+    const dataStr = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    showStatus('Opened full raw file in new tab', 'success');
 }
 
 // Legacy export function (for backward compatibility)
@@ -3125,7 +3275,8 @@ function processImportedWords(imported) {
                 meaning: item.meaning || '',
                 pos: posArray,
                 weight: -3,
-                added: item.added || new Date().toISOString().split('T')[0]
+                added: item.added || new Date().toISOString().split('T')[0],
+                joinedAt: item.joinedAt || undefined
             };
         }
 
@@ -3138,7 +3289,8 @@ function processImportedWords(imported) {
                 meaning: item.meaning || '',
                 pos: posArray,
                 weight: -3,
-                added: item.added || new Date().toISOString().split('T')[0]
+                added: item.added || new Date().toISOString().split('T')[0],
+                joinedAt: item.joinedAt || undefined
             };
         }
 
@@ -3149,7 +3301,8 @@ function processImportedWords(imported) {
             meaning: item.meaning || '',
             pos: posArray,
             weight: weight,
-            added: item.added || new Date().toISOString().split('T')[0]
+            added: item.added || new Date().toISOString().split('T')[0],
+            joinedAt: item.joinedAt || undefined
         };
     });
 
@@ -3542,6 +3695,7 @@ function openSettingsModal() {
     const settings = versionControl.getSettings();
     const actionSoundEnabledInput = document.getElementById('actionSoundEnabledInput');
     const audioPreloadEnabledInput = document.getElementById('audioPreloadEnabledInput');
+    const pronounceVolumeInput = document.getElementById('pronounceVolumeInput');
     document.getElementById('maxVersionsInput').value = settings.maxVersions;
     document.getElementById('projectIdInput').value = getProjectId();
     if (actionSoundEnabledInput) {
@@ -3550,6 +3704,10 @@ function openSettingsModal() {
     if (audioPreloadEnabledInput) {
         audioPreloadEnabledInput.checked = appSettings.audioPreloadEnabled;
     }
+    if (pronounceVolumeInput) {
+        pronounceVolumeInput.value = String(getPronounceVolumePercent());
+    }
+    updatePronounceVolumePreview();
     renderTagManager();
 
     // Reset dirty tracking
@@ -3558,7 +3716,8 @@ function openSettingsModal() {
         maxVersions: String(settings.maxVersions),
         projectId: getProjectId(),
         actionSoundEnabled: appSettings.actionSoundEnabled,
-        audioPreloadEnabled: appSettings.audioPreloadEnabled
+        audioPreloadEnabled: appSettings.audioPreloadEnabled,
+        pronounceVolume: String(getPronounceVolumePercent())
     };
 
     document.getElementById('settingsModal').classList.add('active');
@@ -3577,10 +3736,12 @@ function isSettingsDirty() {
     const projectIdEl = document.getElementById('projectIdInput');
     const actionSoundEl = document.getElementById('actionSoundEnabledInput');
     const audioPreloadEl = document.getElementById('audioPreloadEnabledInput');
+    const pronounceVolumeEl = document.getElementById('pronounceVolumeInput');
     if (maxVersionsEl && maxVersionsEl.value !== _settingsSnapshot.maxVersions) return true;
     if (projectIdEl && projectIdEl.value !== _settingsSnapshot.projectId) return true;
     if (actionSoundEl && actionSoundEl.checked !== _settingsSnapshot.actionSoundEnabled) return true;
     if (audioPreloadEl && audioPreloadEl.checked !== _settingsSnapshot.audioPreloadEnabled) return true;
+    if (pronounceVolumeEl && pronounceVolumeEl.value !== _settingsSnapshot.pronounceVolume) return true;
     return false;
 }
 
@@ -3701,9 +3862,12 @@ function saveSettings() {
     const projectIdInput = document.getElementById('projectIdInput');
     const actionSoundEnabledInput = document.getElementById('actionSoundEnabledInput');
     const audioPreloadEnabledInput = document.getElementById('audioPreloadEnabledInput');
+    const pronounceVolumeInput = document.getElementById('pronounceVolumeInput');
     const projectId = projectIdInput ? projectIdInput.value.trim() : '';
     const nextActionSoundEnabled = actionSoundEnabledInput ? actionSoundEnabledInput.checked : DEFAULT_APP_SETTINGS.actionSoundEnabled;
     const nextAudioPreloadEnabled = audioPreloadEnabledInput ? audioPreloadEnabledInput.checked : DEFAULT_APP_SETTINGS.audioPreloadEnabled;
+    const nextPronounceVolumePercent = pronounceVolumeInput ? parseInt(pronounceVolumeInput.value, 10) : 100;
+    const nextPronounceVolume = Number.isFinite(nextPronounceVolumePercent) ? Math.max(0, Math.min(1, nextPronounceVolumePercent / 100)) : DEFAULT_APP_SETTINGS.pronounceVolume;
 
     if (isNaN(maxVersions) || maxVersions < 10 || maxVersions > 200) {
         alert('Max versions must be between 10 and 200');
@@ -3728,7 +3892,8 @@ function saveSettings() {
 
     appSettings = sanitizeAppSettings({
         actionSoundEnabled: nextActionSoundEnabled,
-        audioPreloadEnabled: nextAudioPreloadEnabled
+        audioPreloadEnabled: nextAudioPreloadEnabled,
+        pronounceVolume: nextPronounceVolume
     });
     saveAppSettings();
     applyAudioPreloadSetting();
@@ -3966,10 +4131,8 @@ function initInPageConfirmModal() {
     cancelBtn.addEventListener('click', function() {
         resolveInPageConfirm(false);
     });
-    modal.addEventListener('click', function(e) {
-        if (e.target === modal) {
-            resolveInPageConfirm(false);
-        }
+    bindModalBackdropPressReleaseClose(modal, function() {
+        resolveInPageConfirm(false);
     });
     document.addEventListener('keydown', function(e) {
         if (e.key !== 'Escape') return;
@@ -4162,6 +4325,16 @@ function navToRoot() {
     updateRegistryToolbarButtons();
 }
 
+function updateHistoryButtonLabel(totalVersions) {
+    const historyBtn = document.getElementById('openHistoryBtn');
+    if (!historyBtn) return;
+
+    const total = Number.isFinite(totalVersions)
+        ? totalVersions
+        : (versionControl ? versionControl.versions.size : 0);
+    historyBtn.textContent = `View History (ver.${total})`;
+}
+
 function updateRegistryStatus() {
     const left = document.getElementById('registryStatusLeft');
     const right = document.getElementById('registryStatusRight');
@@ -4173,6 +4346,7 @@ function updateRegistryStatus() {
 
     const info = document.getElementById('registryVersionInfo');
     info.textContent = `${total} ver.`;
+    updateHistoryButtonLabel(total);
 }
 
 function updatePreviewTabs() {
@@ -4662,18 +4836,15 @@ function goToVersionById(versionId) {
     }
 }
 
-// Close modals on background click
-document.getElementById('settingsModal').addEventListener('click', function(e) {
-    if (e.target === this) {
-        cancelSettings();
-    }
-});
+bindModalBackdropPressReleaseClose(
+    document.getElementById('settingsModal'),
+    cancelSettings
+);
 
-document.getElementById('historyModal').addEventListener('click', function(e) {
-    if (e.target === this) {
-        closeHistoryModal();
-    }
-});
+bindModalBackdropPressReleaseClose(
+    document.getElementById('historyModal'),
+    closeHistoryModal
+);
 
 initInPageConfirmModal();
 

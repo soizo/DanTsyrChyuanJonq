@@ -318,6 +318,7 @@
                 <div class="settings-inline-actions">
                     <button class="btn-secondary" onclick="exportDataOnly()">Data Only</button>
                     <button class="btn-secondary" onclick="exportWithVersionHistory()">With Version History</button>
+                    <button class="btn-secondary" onclick="viewCurrentFullRawFile()">View Full Raw File</button>
                 </div>
             </div>
 
@@ -325,7 +326,7 @@
                 <label>Version History</label>
                 <input type="number" id="maxVersionsInput" min="10" max="200" value="50">
                 <div class="settings-inline-actions">
-                    <button class="btn-secondary" onclick="openHistoryModal()">View History</button>
+                    <button class="btn-secondary" id="openHistoryBtn" onclick="openHistoryModal()">View History</button>
                 </div>
             </div>
 
@@ -393,7 +394,7 @@
                 <div class="registry-toolbar-actions">
                     <span id="registryVersionInfo" class="registry-info"></span>
                     <button class="registry-toolbar-btn" id="registryDeleteBtn" onclick="deleteSelectedVersions()" disabled title="Delete selected">Del</button>
-                    <button class="registry-toolbar-btn" id="registryRenameBtn" onclick="renameSelectedVersion()" disabled title="Rename selected">Ren</button>
+                    <button class="registry-toolbar-btn" id="registryRenameBtn" onclick="renameSelectedVersion()" disabled title="Rename selected">Rename</button>
                     <button class="registry-close" onclick="closeHistoryModal()" aria-label="Close">&times;</button>
                 </div>
             </div>
