@@ -123,18 +123,118 @@ class VersionControl {
         }
     }
 
+    // --- Delta compression helpers ---
+
+    // Compute delta: mixed array of parent indices (number) and new items (object)
+    computeDelta(parentData, newData) {
+        const fingerprints = new Map(); // JSON string -> [indices]
+        parentData.forEach((item, i) => {
+            const fp = JSON.stringify(item);
+            if (!fingerprints.has(fp)) fingerprints.set(fp, []);
+            fingerprints.get(fp).push(i);
+        });
+
+        return newData.map(item => {
+            const fp = JSON.stringify(item);
+            const indices = fingerprints.get(fp);
+            if (indices && indices.length > 0) {
+                return indices.shift(); // Reference parent by index
+            }
+            return JSON.parse(JSON.stringify(item)); // New/modified item
+        });
+    }
+
+    // Apply delta to reconstruct full data
+    applyDelta(parentData, delta) {
+        return delta.map(entry =>
+            typeof entry === 'number' ? parentData[entry] : entry
+        );
+    }
+
+    // Count consecutive delta depth from a version up to nearest snapshot
+    _deltaDepth(versionId) {
+        let depth = 0;
+        let id = versionId;
+        while (id) {
+            const v = this.versions.get(id);
+            if (!v || v.data) break; // snapshot or missing → stop
+            depth++;
+            id = v.parentId;
+        }
+        return depth;
+    }
+
+    // Resolve full data for any version (handles delta chains + caching)
+    resolveData(versionId) {
+        const version = this.versions.get(versionId);
+        if (!version) return null;
+
+        // Check cache
+        if (!this._dataCache) this._dataCache = new Map();
+        if (this._dataCache.has(versionId)) return this._dataCache.get(versionId);
+
+        let result;
+        if (version.data) {
+            // Snapshot (or legacy version with data field)
+            result = version.data;
+        } else if (version.delta && version.parentId) {
+            // Delta version — resolve parent first, then apply
+            const parentData = this.resolveData(version.parentId);
+            if (!parentData) return null;
+            result = this.applyDelta(parentData, version.delta);
+        } else {
+            return null;
+        }
+
+        // Cache (LRU, keep max 5)
+        this._dataCache.set(versionId, result);
+        if (this._dataCache.size > 5) {
+            const oldest = this._dataCache.keys().next().value;
+            this._dataCache.delete(oldest);
+        }
+
+        return result;
+    }
+
+    // Invalidate data cache
+    _clearCache() {
+        if (this._dataCache) this._dataCache.clear();
+    }
+
     // Create a new version (creates child version under current version)
     createVersion(data, description = 'Manual save') {
+        const now = new Date().toISOString();
         const newVersion = {
             id: this.generateId(),
             parentId: this.currentId,
             children: [],
-            timestamp: new Date().toISOString(),
-            data: JSON.parse(JSON.stringify(data)), // Deep copy
+            timestamp: now,
             description: description,
             wordCount: data.length,
-            lastAccessed: new Date().toISOString()
+            lastAccessed: now
         };
+
+        // Decide: snapshot or delta
+        let useSnapshot = true;
+        if (this.currentId) {
+            const parentData = this.resolveData(this.currentId);
+            if (parentData) {
+                const delta = this.computeDelta(parentData, data);
+                const deltaSize = JSON.stringify(delta).length;
+                const fullSize = JSON.stringify(data).length;
+                const depth = this._deltaDepth(this.currentId);
+
+                // Use delta if: not too deep, and delta is meaningfully smaller
+                if (depth < 9 && deltaSize < fullSize * 0.6) {
+                    newVersion.delta = delta;
+                    useSnapshot = false;
+                }
+            }
+        }
+
+        if (useSnapshot) {
+            newVersion.data = JSON.parse(JSON.stringify(data)); // Deep copy
+        }
 
         // If current version exists, add as its child
         if (this.currentId) {
@@ -149,6 +249,7 @@ class VersionControl {
 
         this.versions.set(newVersion.id, newVersion);
         this.currentId = newVersion.id;
+        this._clearCache();
 
         // Limit number of versions (keep recently accessed)
         if (this.versions.size > this.maxVersions) {
@@ -249,6 +350,12 @@ class VersionControl {
     graftTree(importedVersionsObj, importedRootId, importedCurrentId) {
         const importedVersions = new Map(Object.entries(importedVersionsObj));
 
+        // Build a temporary VersionControl to resolve deltas within the imported tree
+        const tempVC = new VersionControl();
+        tempVC.versions = importedVersions;
+        tempVC.rootId = importedRootId;
+        tempVC.currentId = importedCurrentId;
+
         // Build ID remap: old ID -> new ID
         const idMap = new Map();
         for (const oldId of importedVersions.keys()) {
@@ -266,6 +373,16 @@ class VersionControl {
                     : (idMap.get(version.parentId) || null),
                 children: (version.children || []).map(cid => idMap.get(cid)).filter(Boolean)
             };
+
+            // Imported root's parent changes, so if it's a delta, convert to snapshot
+            if (oldId === importedRootId && newVersion.delta && !newVersion.data) {
+                const resolved = tempVC.resolveData(oldId);
+                if (resolved) {
+                    newVersion.data = JSON.parse(JSON.stringify(resolved));
+                    delete newVersion.delta;
+                }
+            }
+
             this.versions.set(newId, newVersion);
         }
 
@@ -277,6 +394,7 @@ class VersionControl {
 
         // Set current to imported current
         this.currentId = idMap.get(importedCurrentId) || this.currentId;
+        this._clearCache();
 
         // Prune if needed
         if (this.versions.size > this.maxVersions) {
@@ -310,6 +428,7 @@ class VersionControl {
 
         // Delete this version
         this.versions.delete(versionId);
+        this._clearCache();
     }
 
     // Delete only this version and reparent its children to its parent
@@ -322,6 +441,20 @@ class VersionControl {
         const parent = parentId ? this.versions.get(parentId) : null;
         const versionChildren = Array.isArray(version.children) ? version.children : [];
         const childrenToReparent = [...versionChildren];
+
+        // Delta children reference this version as parent.
+        // Convert them to snapshots before reparenting so they don't break.
+        for (const childId of childrenToReparent) {
+            const child = this.versions.get(childId);
+            if (child && child.delta && !child.data) {
+                const resolved = this.resolveData(childId);
+                if (resolved) {
+                    child.data = JSON.parse(JSON.stringify(resolved));
+                    delete child.delta;
+                }
+            }
+        }
+        this._clearCache();
 
         // Reattach children in place of the deleted node to preserve branch order.
         if (parent) {
@@ -429,6 +562,7 @@ class VersionControl {
         this.versions = new Map();
         this.rootId = null;
         this.currentId = null;
+        this._clearCache();
         this.saveHistory();
     }
 
@@ -2355,7 +2489,7 @@ function exportWithVersionHistory() {
         projectId,
         words: words,
         versionHistory: {
-            format: 'tree-v1',
+            format: 'tree-v2',
             versions: Object.fromEntries(versionControl.versions),
             rootId: versionControl.rootId,
             currentId: versionControl.currentId,
@@ -2381,7 +2515,7 @@ function exportData() {
 
 // Validate version history structure
 function validateVersionHistory(versionHistory) {
-    if (!versionHistory.format || versionHistory.format !== 'tree-v1') {
+    if (!versionHistory.format || (versionHistory.format !== 'tree-v1' && versionHistory.format !== 'tree-v2')) {
         return { valid: false, error: 'Unsupported format version' };
     }
 
@@ -2519,8 +2653,9 @@ function importWithVersionHistory(importedData) {
 
     // Switch to the imported current version
     const currentVersion = versionControl.versions.get(newCurrentId);
-    if (currentVersion && currentVersion.data) {
-        words = JSON.parse(JSON.stringify(currentVersion.data));
+    const resolvedData = currentVersion ? versionControl.resolveData(newCurrentId) : null;
+    if (resolvedData) {
+        words = JSON.parse(JSON.stringify(resolvedData));
     } else {
         const { processed } = processImportedWords(importedData.words);
         words = processed;
@@ -2540,11 +2675,13 @@ function importReplaceWithVersionHistory(importedData) {
     versionControl.versions = new Map(Object.entries(vh.versions));
     versionControl.rootId = vh.rootId;
     versionControl.currentId = vh.currentId;
+    versionControl._clearCache();
     versionControl.saveHistory();
 
     const currentVersion = versionControl.versions.get(versionControl.currentId);
-    if (currentVersion && currentVersion.data) {
-        words = JSON.parse(JSON.stringify(currentVersion.data));
+    const resolvedData = currentVersion ? versionControl.resolveData(versionControl.currentId) : null;
+    if (resolvedData) {
+        words = JSON.parse(JSON.stringify(resolvedData));
     } else {
         words = processed;
     }
@@ -2752,7 +2889,7 @@ function performUndo() {
 
     const version = versionControl.undo();
     if (version) {
-        words = JSON.parse(JSON.stringify(version.data)); // Deep copy
+        words = JSON.parse(JSON.stringify(versionControl.resolveData(version.id))); // Deep copy
         localStorage.setItem('wordMemoryData', JSON.stringify(words));
         renderWords();
         showStatus(`Undo: ${version.description}`, 'success');
@@ -2772,7 +2909,7 @@ function performRedo() {
 
     const version = versionControl.redo();
     if (version) {
-        words = JSON.parse(JSON.stringify(version.data)); // Deep copy
+        words = JSON.parse(JSON.stringify(versionControl.resolveData(version.id))); // Deep copy
         localStorage.setItem('wordMemoryData', JSON.stringify(words));
         renderWords();
         showStatus(`Redo: ${version.description}`, 'success');
@@ -3401,7 +3538,7 @@ function renderTreeRowHTML(row) {
     const label = getVersionDisplayLabel(version);
     const wordCount = Number.isFinite(version.wordCount)
         ? version.wordCount
-        : (Array.isArray(version.data) ? version.data.length : 0);
+        : 0;
     const branchCount = childCount;
     const compressedDepth = Math.max(0, depth - visualDepth);
 
@@ -3526,9 +3663,12 @@ async function deleteSelectedVersions() {
     if (deletingCurrent) {
         const currentVersion = versionControl.versions.get(versionControl.currentId);
         if (currentVersion) {
-            words = JSON.parse(JSON.stringify(currentVersion.data));
-            localStorage.setItem('wordMemoryData', JSON.stringify(words));
-            renderWords();
+            const resolvedData = versionControl.resolveData(currentVersion.id);
+            if (resolvedData) {
+                words = JSON.parse(JSON.stringify(resolvedData));
+                localStorage.setItem('wordMemoryData', JSON.stringify(words));
+                renderWords();
+            }
         }
     }
 
@@ -3606,7 +3746,7 @@ function openMobilePreview(versionId) {
     title.textContent = version.description || formatVersionDate(version.timestamp);
     gotoBtn.setAttribute('onclick', `goToVersionById('${versionId}'); closeMobilePreview();`);
 
-    content.innerHTML = renderJsonHighlight(version.data);
+    content.innerHTML = renderJsonHighlight(versionControl.resolveData(versionId));
     overlay.classList.add('active');
 }
 
@@ -3636,9 +3776,13 @@ function renderRegistryPreview() {
             container.innerHTML = '<div class="registry-preview-empty">Select a different version to compare with current</div>';
             return;
         }
-        container.innerHTML = renderDiffView(version.data, currentVersion.data, version, currentVersion);
+        container.innerHTML = renderDiffView(
+            versionControl.resolveData(version.id),
+            versionControl.resolveData(currentVersion.id),
+            version, currentVersion
+        );
     } else {
-        container.innerHTML = renderJsonHighlight(version.data);
+        container.innerHTML = renderJsonHighlight(versionControl.resolveData(version.id));
     }
 }
 
@@ -3783,7 +3927,7 @@ function goToVersionById(versionId) {
 
     const version = versionControl.goToVersion(versionId);
     if (version) {
-        words = JSON.parse(JSON.stringify(version.data));
+        words = JSON.parse(JSON.stringify(versionControl.resolveData(versionId)));
         localStorage.setItem('wordMemoryData', JSON.stringify(words));
         renderWords();
         renderRegistryTree();
