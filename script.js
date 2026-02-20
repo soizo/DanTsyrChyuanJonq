@@ -1345,12 +1345,7 @@ window.onload = function() {
     }
     updateHistoryButtonLabel();
 
-    if (appSettings.actionSoundEnabled) {
-        deleteActionSoundAudio = new Audio('assets/delete.mp3');
-        deleteActionSoundAudio.preload = 'auto';
-        putActionSoundAudio = new Audio('assets/put.mp3');
-        putActionSoundAudio.preload = 'auto';
-    }
+    _initActionSounds();
 
     renderWords();
     resetAddAndBatchToolbarInputs();
@@ -1466,38 +1461,34 @@ function updatePortraitModeSwitchTop() {
 window.addEventListener('scroll', updatePortraitModeSwitchTop, { passive: true });
 window.addEventListener('resize', () => { modeSwitchNaturalTop = null; updatePortraitModeSwitchTop(); });
 
-function toggleMode() {
-    modeToggle.classList.toggle('active');
-    hideMeaning = !hideMeaning;
-
-    // Preserve scroll position by anchoring to a visible word item
-    const scrollContainer = document.querySelector('.workspace-right');
-    let anchorWord = null;
-    let anchorOffset = 0;
-    if (scrollContainer) {
-        const items = scrollContainer.querySelectorAll('.word-item');
-        const containerTop = scrollContainer.getBoundingClientRect().top;
-        for (const item of items) {
+// Run fn() while preserving the scroll anchor of the first visible word item
+function withScrollAnchor(fn) {
+    const sc = document.querySelector('.workspace-right');
+    let anchorWord = null, anchorOffset = 0;
+    if (sc) {
+        const top = sc.getBoundingClientRect().top;
+        for (const item of sc.querySelectorAll('.word-item')) {
             const rect = item.getBoundingClientRect();
-            if (rect.bottom > containerTop) {
+            if (rect.bottom > top) {
                 anchorWord = item.getAttribute('data-word');
-                anchorOffset = rect.top - containerTop;
+                anchorOffset = rect.top - top;
                 break;
             }
         }
     }
-
-    renderWords();
-
-    // Restore scroll position to the same word item
-    if (scrollContainer && anchorWord) {
-        const target = scrollContainer.querySelector(`.word-item[data-word="${CSS.escape(anchorWord)}"]`);
+    fn();
+    if (sc && anchorWord) {
+        const target = sc.querySelector(`.word-item[data-word="${CSS.escape(anchorWord)}"]`);
         if (target) {
-            const containerTop = scrollContainer.getBoundingClientRect().top;
-            const targetTop = target.getBoundingClientRect().top;
-            scrollContainer.scrollTop += (targetTop - containerTop) - anchorOffset;
+            sc.scrollTop += target.getBoundingClientRect().top - sc.getBoundingClientRect().top - anchorOffset;
         }
     }
+}
+
+function toggleMode() {
+    modeToggle.classList.toggle('active');
+    hideMeaning = !hideMeaning;
+    withScrollAnchor(() => renderWords());
 }
 
 modeToggle.addEventListener('click', toggleMode);
@@ -1520,19 +1511,13 @@ let weightDropdown = null;
 let editPosDropdown = null;
 let editWeightDropdown = null;
 
-function togglePosDropdown() {
-    if (posDropdown) {
-        posDropdown.toggle();
-    }
-}
+function togglePosDropdown() { if (posDropdown) posDropdown.toggle(); }
 
 function renderPosSelection(containerId, values) {
     const container = document.getElementById(containerId);
-    if (values.length === 0) {
-        container.innerHTML = '<span class="pos-placeholder">POS</span>';
-    } else {
-        container.innerHTML = values.map(p => `<span class="pos-tag">${p}</span>`).join('');
-    }
+    container.innerHTML = values.length === 0
+        ? '<span class="pos-placeholder">POS</span>'
+        : values.map(p => `<span class="pos-tag">${p}</span>`).join('');
 }
 
 function syncPosOptionState(dropdownId, values) {
@@ -1542,36 +1527,28 @@ function syncPosOptionState(dropdownId, values) {
     });
 }
 
+function _togglePosFor(getArr, setArr, updateFn, option, event) {
+    if (event) event.stopPropagation();
+    const value = option.dataset.value;
+    if (!value) return;
+    const arr = getArr();
+    setArr(arr.includes(value) ? arr.filter(p => p !== value) : [...arr, value]);
+    updateFn();
+}
+
 function updatePosSelection() {
     renderPosSelection('posSelected', selectedPos);
     syncPosOptionState('posDropdown', selectedPos);
 }
 
 function togglePosOption(option, event) {
-    if (event) {
-        event.stopPropagation();
-    }
-
-    const value = option.dataset.value;
-    if (!value) return;
-
-    if (selectedPos.includes(value)) {
-        selectedPos = selectedPos.filter(pos => pos !== value);
-    } else {
-        selectedPos = [...selectedPos, value];
-    }
-
-    updatePosSelection();
+    _togglePosFor(() => selectedPos, v => { selectedPos = v; }, updatePosSelection, option, event);
 }
 
 // POS selection for edit form
 let editSelectedPos = [];
 
-function toggleEditPosDropdown() {
-    if (editPosDropdown) {
-        editPosDropdown.toggle();
-    }
-}
+function toggleEditPosDropdown() { if (editPosDropdown) editPosDropdown.toggle(); }
 
 function updateEditPosSelection() {
     renderPosSelection('editPosSelected', editSelectedPos);
@@ -1579,77 +1556,41 @@ function updateEditPosSelection() {
 }
 
 function toggleEditPosOption(option, event) {
-    if (event) {
-        event.stopPropagation();
-    }
-
-    const value = option.dataset.value;
-    if (!value) return;
-
-    if (editSelectedPos.includes(value)) {
-        editSelectedPos = editSelectedPos.filter(pos => pos !== value);
-    } else {
-        editSelectedPos = [...editSelectedPos, value];
-    }
-
-    updateEditPosSelection();
+    _togglePosFor(() => editSelectedPos, v => { editSelectedPos = v; }, updateEditPosSelection, option, event);
 }
 
 function syncWeightOptionState(dropdownId, value) {
     document.querySelectorAll(`#${dropdownId} .weight-option`).forEach(option => {
-        const optionValue = parseInt(option.dataset.value, 10);
-        option.classList.toggle('selected', optionValue === value);
+        option.classList.toggle('selected', parseInt(option.dataset.value, 10) === value);
     });
 }
 
-function updateWeightSelection() {
-    document.getElementById('weightSelected').textContent = String(selectedWeight);
-    syncWeightOptionState('weightDropdown', selectedWeight);
+function _updateWeightSelectionImpl(selectedId, dropdownId, value) {
+    document.getElementById(selectedId).textContent = String(value);
+    syncWeightOptionState(dropdownId, value);
 }
 
-function updateEditWeightSelection() {
-    document.getElementById('editWeightSelected').textContent = String(editSelectedWeight);
-    syncWeightOptionState('editWeightDropdown', editSelectedWeight);
-}
+function updateWeightSelection() { _updateWeightSelectionImpl('weightSelected', 'weightDropdown', selectedWeight); }
+function updateEditWeightSelection() { _updateWeightSelectionImpl('editWeightSelected', 'editWeightDropdown', editSelectedWeight); }
 
-function toggleWeightDropdown() {
-    if (weightDropdown) {
-        weightDropdown.toggle();
-    }
-}
+function toggleWeightDropdown() { if (weightDropdown) weightDropdown.toggle(); }
+function toggleEditWeightDropdown() { if (editWeightDropdown) editWeightDropdown.toggle(); }
 
-function toggleEditWeightDropdown() {
-    if (editWeightDropdown) {
-        editWeightDropdown.toggle();
-    }
+function _setWeightFor(setValue, updateFn, dropdown, option, event) {
+    if (event) event.stopPropagation();
+    const value = parseInt(option.dataset.value, 10);
+    if (Number.isNaN(value)) return;
+    setValue(value);
+    updateFn();
+    if (dropdown) dropdown.close();
 }
 
 function setWeightOption(option, event) {
-    if (event) {
-        event.stopPropagation();
-    }
-
-    const value = parseInt(option.dataset.value, 10);
-    if (Number.isNaN(value)) return;
-    selectedWeight = value;
-    updateWeightSelection();
-    if (weightDropdown) {
-        weightDropdown.close();
-    }
+    _setWeightFor(v => { selectedWeight = v; }, updateWeightSelection, weightDropdown, option, event);
 }
 
 function setEditWeightOption(option, event) {
-    if (event) {
-        event.stopPropagation();
-    }
-
-    const value = parseInt(option.dataset.value, 10);
-    if (Number.isNaN(value)) return;
-    editSelectedWeight = value;
-    updateEditWeightSelection();
-    if (editWeightDropdown) {
-        editWeightDropdown.close();
-    }
+    _setWeightFor(v => { editSelectedWeight = v; }, updateEditWeightSelection, editWeightDropdown, option, event);
 }
 
 // ========================================
@@ -2077,39 +2018,8 @@ function toggleSortMode() {
 // Toggle select mode
 function toggleSelectMode() {
     isSelectMode = !isSelectMode;
-    if (!isSelectMode) {
-        selectedWords.clear();
-    }
-
-    // Preserve scroll position by anchoring to a visible word item
-    const scrollContainer = document.querySelector('.workspace-right');
-    let anchorWord = null;
-    let anchorOffset = 0;
-    if (scrollContainer) {
-        const items = scrollContainer.querySelectorAll('.word-item');
-        const containerTop = scrollContainer.getBoundingClientRect().top;
-        for (const item of items) {
-            const rect = item.getBoundingClientRect();
-            if (rect.bottom > containerTop) {
-                anchorWord = item.getAttribute('data-word');
-                anchorOffset = rect.top - containerTop;
-                break;
-            }
-        }
-    }
-
-    renderWords();
-    updateBatchToolbar();
-
-    // Restore scroll position to the same word item
-    if (scrollContainer && anchorWord) {
-        const target = scrollContainer.querySelector(`.word-item[data-word="${CSS.escape(anchorWord)}"]`);
-        if (target) {
-            const containerTop = scrollContainer.getBoundingClientRect().top;
-            const targetTop = target.getBoundingClientRect().top;
-            scrollContainer.scrollTop += (targetTop - containerTop) - anchorOffset;
-        }
-    }
+    if (!isSelectMode) selectedWords.clear();
+    withScrollAnchor(() => { renderWords(); updateBatchToolbar(); });
 }
 
 // Update batch toolbar and buttons
@@ -2187,61 +2097,46 @@ function selectInvert() {
 
 }
 
+// Add or remove words matching predicate from selectedWords
+function _modifySelectionByPredicate(predicate, action) {
+    let count = 0;
+    words.forEach((w, i) => {
+        if (!predicate(w)) return;
+        if (action === 'add') {
+            selectedWords.add(i);
+            count++;
+        } else if (selectedWords.has(i)) {
+            selectedWords.delete(i);
+            count++;
+        }
+    });
+    updateBatchToolbar();
+    updateWordSelectionUI();
+    return count;
+}
+
 // Parse weight range inputs
 function getWeightRange() {
     const minVal = document.getElementById('weightMinInput').value.trim();
     const maxVal = document.getElementById('weightMaxInput').value.trim();
-
     const min = minVal === '' ? -3 : parseInt(minVal, 10);
     const max = maxVal === '' ? Infinity : parseInt(maxVal, 10);
-
     if (isNaN(min)) return null;
     if (maxVal !== '' && isNaN(max)) return null;
-
     return { min, max };
 }
 
-// Add weight range to selection
 function addWeightRange() {
     const range = getWeightRange();
-    if (!range) {
-        showStatus('Invalid weight range', 'error');
-        return;
-    }
-
-    let count = 0;
-    words.forEach((w, index) => {
-        if (w.weight >= range.min && w.weight <= range.max) {
-            selectedWords.add(index);
-            count++;
-        }
-    });
-
-    updateBatchToolbar();
-    updateWordSelectionUI();
+    if (!range) { showStatus('Invalid weight range', 'error'); return; }
+    const count = _modifySelectionByPredicate(w => w.weight >= range.min && w.weight <= range.max, 'add');
     showStatus(`+${count} word(s)`, 'success');
 }
 
-// Remove weight range from selection
 function removeWeightRange() {
     const range = getWeightRange();
-    if (!range) {
-        showStatus('Invalid weight range', 'error');
-        return;
-    }
-
-    let count = 0;
-    words.forEach((w, index) => {
-        if (w.weight >= range.min && w.weight <= range.max) {
-            if (selectedWords.has(index)) {
-                selectedWords.delete(index);
-                count++;
-            }
-        }
-    });
-
-    updateBatchToolbar();
-    updateWordSelectionUI();
+    if (!range) { showStatus('Invalid weight range', 'error'); return; }
+    const count = _modifySelectionByPredicate(w => w.weight >= range.min && w.weight <= range.max, 'remove');
     showStatus(`−${count} word(s)`, 'success');
 }
 
@@ -2249,59 +2144,21 @@ function removeWeightRange() {
 function getDateRange() {
     const minVal = document.getElementById('dateMinInput').value;
     const maxVal = document.getElementById('dateMaxInput').value;
-
-    // At least one date must be provided
     if (!minVal && !maxVal) return null;
-
-    return {
-        min: minVal || null,
-        max: maxVal || null
-    };
+    return { min: minVal || null, max: maxVal || null };
 }
 
-// Add date range to selection
 function addDateRange() {
     const range = getDateRange();
-    if (!range) {
-        showStatus('Please set at least one date', 'error');
-        return;
-    }
-
-    let count = 0;
-    words.forEach((w, index) => {
-        const date = w.added;
-        if ((!range.min || date >= range.min) && (!range.max || date <= range.max)) {
-            selectedWords.add(index);
-            count++;
-        }
-    });
-
-    updateBatchToolbar();
-    updateWordSelectionUI();
+    if (!range) { showStatus('Please set at least one date', 'error'); return; }
+    const count = _modifySelectionByPredicate(w => (!range.min || w.added >= range.min) && (!range.max || w.added <= range.max), 'add');
     showStatus(`+${count} word(s)`, 'success');
 }
 
-// Remove date range from selection
 function removeDateRange() {
     const range = getDateRange();
-    if (!range) {
-        showStatus('Please set at least one date', 'error');
-        return;
-    }
-
-    let count = 0;
-    words.forEach((w, index) => {
-        const date = w.added;
-        if ((!range.min || date >= range.min) && (!range.max || date <= range.max)) {
-            if (selectedWords.has(index)) {
-                selectedWords.delete(index);
-                count++;
-            }
-        }
-    });
-
-    updateBatchToolbar();
-    updateWordSelectionUI();
+    if (!range) { showStatus('Please set at least one date', 'error'); return; }
+    const count = _modifySelectionByPredicate(w => (!range.min || w.added >= range.min) && (!range.max || w.added <= range.max), 'remove');
     showStatus(`−${count} word(s)`, 'success');
 }
 
@@ -2324,99 +2181,35 @@ function validateRegexInput() {
     }
 }
 
-// Select by regex (add matching words to selection)
 function selectByRegex() {
     const pattern = document.getElementById('regexFilterInput').value.trim();
-    if (!pattern) {
-        showStatus('Please enter a regex pattern', 'error');
-        return;
-    }
-
+    if (!pattern) { showStatus('Please enter a regex pattern', 'error'); return; }
     if (!validateRegexInput()) return;
-
     const regex = new RegExp(pattern, 'i');
-    let matchCount = 0;
-
-    words.forEach((w, index) => {
-        if (regex.test(w.word) || regex.test(w.meaning)) {
-            selectedWords.add(index);
-            matchCount++;
-        }
-    });
-
-    updateBatchToolbar();
-    updateWordSelectionUI();
-
-    showStatus(`Matched ${matchCount} word(s)`, 'success');
+    const count = _modifySelectionByPredicate(w => regex.test(w.word) || regex.test(w.meaning), 'add');
+    showStatus(`Matched ${count} word(s)`, 'success');
 }
 
-// Deselect by regex (remove matching words from selection)
 function deselectByRegex() {
     const pattern = document.getElementById('regexFilterInput').value.trim();
-    if (!pattern) {
-        showStatus('Please enter a regex pattern', 'error');
-        return;
-    }
-
+    if (!pattern) { showStatus('Please enter a regex pattern', 'error'); return; }
     if (!validateRegexInput()) return;
-
     const regex = new RegExp(pattern, 'i');
-    let matchCount = 0;
-
-    words.forEach((w, index) => {
-        if (regex.test(w.word) || regex.test(w.meaning)) {
-            selectedWords.delete(index);
-            matchCount++;
-        }
-    });
-
-    updateBatchToolbar();
-    updateWordSelectionUI();
-
-    showStatus(`Unmatched ${matchCount} word(s)`, 'success');
+    const count = _modifySelectionByPredicate(w => regex.test(w.word) || regex.test(w.meaning), 'remove');
+    showStatus(`Unmatched ${count} word(s)`, 'success');
 }
 
-// Select by tag
 function selectByTag() {
     const tagId = tagSelectorState.batchFilter;
-    if (!tagId) {
-        showStatus('Please select a tag', 'error');
-        return;
-    }
-
-    let count = 0;
-    words.forEach((w, index) => {
-        if ((w.tags || []).includes(tagId)) {
-            selectedWords.add(index);
-            count++;
-        }
-    });
-
-    updateBatchToolbar();
-    updateWordSelectionUI();
+    if (!tagId) { showStatus('Please select a tag', 'error'); return; }
+    const count = _modifySelectionByPredicate(w => (w.tags || []).includes(tagId), 'add');
     showStatus(`+${count} word(s)`, 'success');
 }
 
-// Deselect by tag
 function deselectByTag() {
     const tagId = tagSelectorState.batchFilter;
-    if (!tagId) {
-        showStatus('Please select a tag', 'error');
-        return;
-    }
-
-    let count = 0;
-    words.forEach((w, index) => {
-        if ((w.tags || []).includes(tagId)) {
-            if (selectedWords.has(index)) {
-                selectedWords.delete(index);
-                count++;
-            }
-        }
-    });
-
-    updateBatchToolbar();
-    updateWordSelectionUI();
+    if (!tagId) { showStatus('Please select a tag', 'error'); return; }
+    const count = _modifySelectionByPredicate(w => (w.tags || []).includes(tagId), 'remove');
     showStatus(`−${count} word(s)`, 'success');
 }
 
@@ -3134,22 +2927,20 @@ function loadData() {
 }
 
 // Export data
-// Export data only (without version history)
-function exportDataOnly() {
-    const projectId = getProjectId();
-    const exportObj = {
-        projectId,
-        words: words,
-        tagRegistry: tagRegistry
-    };
-    const dataStr = JSON.stringify(exportObj, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
+function _downloadJsonFile(obj, filename) {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `wordlist-${toSafeFilenamePart(projectId)}.json`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+}
+
+// Export data only (without version history)
+function exportDataOnly() {
+    const projectId = getProjectId();
+    _downloadJsonFile({ projectId, words, tagRegistry }, `wordlist-${toSafeFilenamePart(projectId)}.json`);
     showStatus('Exported data only', 'success');
 }
 
@@ -3174,20 +2965,9 @@ function buildFullExportData() {
 // Export data with complete version history
 function exportWithVersionHistory() {
     const exportData = buildFullExportData();
-    if (!exportData) {
-        showStatus('Version control not initialized', 'error');
-        return;
-    }
-
+    if (!exportData) { showStatus('Version control not initialized', 'error'); return; }
     const projectId = getProjectId();
-    const dataStr = JSON.stringify(exportData, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `wordlist-${toSafeFilenamePart(projectId)}-full.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    _downloadJsonFile(exportData, `wordlist-${toSafeFilenamePart(projectId)}-full.json`);
     showStatus('Exported data with version history', 'success');
 }
 
@@ -3309,11 +3089,7 @@ function processImportedWords(imported) {
     return { processed, validCount, invalidCount };
 }
 
-// Import words only (clear version history)
-function importWordsOnly(wordsData, importedTagRegistry) {
-    const { processed, validCount, invalidCount } = processImportedWords(wordsData);
-    words = processed;
-
+function _applyImportedTagRegistry(importedTagRegistry) {
     if (importedTagRegistry && Array.isArray(importedTagRegistry)) {
         tagRegistry = importedTagRegistry;
     } else {
@@ -3321,15 +3097,16 @@ function importWordsOnly(wordsData, importedTagRegistry) {
         migrateStringTagsToRegistry();
     }
     saveTagRegistry();
+}
 
-    // Clear version history and create new initial version
-    if (versionControl) {
-        versionControl.clearHistory();
-    }
-
+// Import words only (clear version history)
+function importWordsOnly(wordsData, importedTagRegistry) {
+    const { processed, validCount, invalidCount } = processImportedWords(wordsData);
+    words = processed;
+    _applyImportedTagRegistry(importedTagRegistry);
+    if (versionControl) versionControl.clearHistory();
     saveData(false, `Imported ${processed.length} word(s)`);
     renderWords();
-
     if (invalidCount > 0) {
         showStatus(`Imported ${validCount} valid, ${invalidCount} invalid words (version history cleared)`, 'success');
     } else {
@@ -3341,22 +3118,11 @@ function importWordsOnly(wordsData, importedTagRegistry) {
 function importAsOverwrite(wordsData, description, importedTagRegistry) {
     const { processed } = processImportedWords(wordsData);
     words = processed;
-
-    if (importedTagRegistry && Array.isArray(importedTagRegistry)) {
-        tagRegistry = importedTagRegistry;
-    } else {
-        tagRegistry = [];
-        migrateStringTagsToRegistry();
-    }
-    saveTagRegistry();
-
+    _applyImportedTagRegistry(importedTagRegistry);
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
-
-    // Create a new version branching from current
     if (versionControl) {
         versionControl.createVersion(words, description || `Overwrite import (${processed.length} words)`);
     }
-
     renderWords();
     showStatus(`Overwrite imported ${processed.length} words as new branch`, 'success');
 }
@@ -3365,11 +3131,7 @@ function importAsOverwrite(wordsData, description, importedTagRegistry) {
 function importWithVersionHistory(importedData) {
     const vh = importedData.versionHistory;
     const importedVersionCount = Object.keys(vh.versions).length;
-
-    // Graft the imported tree as a new branch under local root
     const newCurrentId = versionControl.graftTree(vh.versions, vh.rootId, vh.currentId);
-
-    // Switch to the imported current version
     const currentVersion = versionControl.versions.get(newCurrentId);
     const resolvedData = currentVersion ? versionControl.resolveData(newCurrentId) : null;
     if (resolvedData) {
@@ -3378,18 +3140,9 @@ function importWithVersionHistory(importedData) {
         const { processed } = processImportedWords(importedData.words);
         words = processed;
     }
-
-    if (importedData.tagRegistry && Array.isArray(importedData.tagRegistry)) {
-        tagRegistry = importedData.tagRegistry;
-    } else {
-        tagRegistry = [];
-        migrateStringTagsToRegistry();
-    }
-    saveTagRegistry();
-
+    _applyImportedTagRegistry(importedData.tagRegistry);
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
     renderWords();
-
     showStatus(`Forked: imported ${importedVersionCount} version(s) as new branch`, 'success');
 }
 
@@ -3397,34 +3150,18 @@ function importWithVersionHistory(importedData) {
 function importReplaceWithVersionHistory(importedData) {
     const { processed } = processImportedWords(importedData.words);
     const vh = importedData.versionHistory;
-
     versionControl.versions = new Map(Object.entries(vh.versions));
     versionControl.rootId = vh.rootId;
     versionControl.currentId = vh.currentId;
     versionControl._clearCache();
     versionControl.saveHistory();
-
     const currentVersion = versionControl.versions.get(versionControl.currentId);
     const resolvedData = currentVersion ? versionControl.resolveData(versionControl.currentId) : null;
-    if (resolvedData) {
-        words = JSON.parse(JSON.stringify(resolvedData));
-    } else {
-        words = processed;
-    }
-
-    if (importedData.tagRegistry && Array.isArray(importedData.tagRegistry)) {
-        tagRegistry = importedData.tagRegistry;
-    } else {
-        tagRegistry = [];
-        migrateStringTagsToRegistry();
-    }
-    saveTagRegistry();
-
+    words = resolvedData ? JSON.parse(JSON.stringify(resolvedData)) : processed;
+    _applyImportedTagRegistry(importedData.tagRegistry);
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
     renderWords();
-
-    const versionCount = versionControl.versions.size;
-    showStatus(`Replaced: imported ${versionCount} version(s)`, 'success');
+    showStatus(`Replaced: imported ${versionControl.versions.size} version(s)`, 'success');
 }
 
 function isJsonImportFile(file) {
@@ -3609,43 +3346,49 @@ document.getElementById('meaningInput').addEventListener('keypress', function(e)
     if (e.key === 'Enter') addWord();
 });
 
+// Apply a resolved version's data to words + localStorage + re-render
+function _applyVersionWords(versionId) {
+    const data = versionControl.resolveData(versionId);
+    if (!data) return false;
+    words = JSON.parse(JSON.stringify(data));
+    localStorage.setItem('wordMemoryData', JSON.stringify(words));
+    renderWords();
+    return true;
+}
+
+function _initActionSounds() {
+    if (!appSettings.actionSoundEnabled) {
+        deleteActionSoundAudio = null;
+        putActionSoundAudio = null;
+    } else {
+        if (!deleteActionSoundAudio) {
+            deleteActionSoundAudio = new Audio('assets/delete.mp3');
+            deleteActionSoundAudio.preload = 'auto';
+        }
+        if (!putActionSoundAudio) {
+            putActionSoundAudio = new Audio('assets/put.mp3');
+            putActionSoundAudio.preload = 'auto';
+        }
+    }
+}
+
 // Undo/Redo functions
 function performUndo() {
-    if (!versionControl) {
-        showStatus('Version control not initialized', 'error');
-        return;
-    }
-
-    if (!versionControl.canUndo()) {
-        showStatus('Nothing to undo', 'info');
-        return;
-    }
-
+    if (!versionControl) { showStatus('Version control not initialized', 'error'); return; }
+    if (!versionControl.canUndo()) { showStatus('Nothing to undo', 'info'); return; }
     const version = versionControl.undo();
     if (version) {
-        words = JSON.parse(JSON.stringify(versionControl.resolveData(version.id))); // Deep copy
-        localStorage.setItem('wordMemoryData', JSON.stringify(words));
-        renderWords();
+        _applyVersionWords(version.id);
         showStatus(`Undo: ${version.description}`, 'success');
     }
 }
 
 function performRedo() {
-    if (!versionControl) {
-        showStatus('Version control not initialized', 'error');
-        return;
-    }
-
-    if (!versionControl.canRedo()) {
-        showStatus('Nothing to redo', 'info');
-        return;
-    }
-
+    if (!versionControl) { showStatus('Version control not initialized', 'error'); return; }
+    if (!versionControl.canRedo()) { showStatus('Nothing to redo', 'info'); return; }
     const version = versionControl.redo();
     if (version) {
-        words = JSON.parse(JSON.stringify(versionControl.resolveData(version.id))); // Deep copy
-        localStorage.setItem('wordMemoryData', JSON.stringify(words));
-        renderWords();
+        _applyVersionWords(version.id);
         showStatus(`Redo: ${version.description}`, 'success');
     }
 }
@@ -3900,19 +3643,7 @@ function saveSettings() {
     enforceGroupModeByTagAvailability();
     renderWords();
 
-    if (!appSettings.actionSoundEnabled) {
-        deleteActionSoundAudio = null;
-        putActionSoundAudio = null;
-    } else {
-        if (!deleteActionSoundAudio) {
-            deleteActionSoundAudio = new Audio('assets/delete.mp3');
-            deleteActionSoundAudio.preload = 'auto';
-        }
-        if (!putActionSoundAudio) {
-            putActionSoundAudio = new Audio('assets/put.mp3');
-            putActionSoundAudio.preload = 'auto';
-        }
-    }
+    _initActionSounds();
 
     showStatus('Settings saved', 'success');
     closeSettingsModal();
@@ -4561,12 +4292,7 @@ async function deleteSelectedVersions() {
     if (deletingCurrent) {
         const currentVersion = versionControl.versions.get(versionControl.currentId);
         if (currentVersion) {
-            const resolvedData = versionControl.resolveData(currentVersion.id);
-            if (resolvedData) {
-                words = JSON.parse(JSON.stringify(resolvedData));
-                localStorage.setItem('wordMemoryData', JSON.stringify(words));
-                renderWords();
-            }
+            _applyVersionWords(currentVersion.id);
         }
     }
 
@@ -4825,9 +4551,7 @@ function goToVersionById(versionId) {
 
     const version = versionControl.goToVersion(versionId);
     if (version) {
-        words = JSON.parse(JSON.stringify(versionControl.resolveData(versionId)));
-        localStorage.setItem('wordMemoryData', JSON.stringify(words));
-        renderWords();
+        _applyVersionWords(versionId);
         renderRegistryTree();
         renderRegistryPreview();
         updateRegistryStatus();
