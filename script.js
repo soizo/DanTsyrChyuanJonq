@@ -3463,6 +3463,15 @@ function openSettingsModal() {
         pronounceVolume: String(getPronounceVolumePercent())
     };
 
+    document.querySelectorAll('.settings-toggle-item:not([data-click-bound])').forEach(item => {
+        item.dataset.clickBound = 'true';
+        item.addEventListener('click', (e) => {
+            if (e.target.closest('input[type="checkbox"]') || e.target.closest('label')) return;
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            if (checkbox) checkbox.click();
+        });
+    });
+
     document.getElementById('settingsModal').classList.add('active');
 }
 
