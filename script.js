@@ -2965,7 +2965,7 @@ function buildFullExportData() {
 // Export data with complete version history
 function exportWithVersionHistory() {
     const exportData = buildFullExportData();
-    if (!exportData) { showStatus('Version control not initialized', 'error'); return; }
+    if (!exportData) { showStatus('Version control not initialised', 'error'); return; }
     const projectId = getProjectId();
     _downloadJsonFile(exportData, `wordlist-${toSafeFilenamePart(projectId)}-full.json`);
     showStatus('Exported data with version history', 'success');
@@ -2974,7 +2974,7 @@ function exportWithVersionHistory() {
 function viewCurrentFullRawFile() {
     const exportData = buildFullExportData();
     if (!exportData) {
-        showStatus('Version control not initialized', 'error');
+        showStatus('Version control not initialised', 'error');
         return;
     }
 
@@ -3374,7 +3374,7 @@ function _initActionSounds() {
 
 // Undo/Redo functions
 function performUndo() {
-    if (!versionControl) { showStatus('Version control not initialized', 'error'); return; }
+    if (!versionControl) { showStatus('Version control not initialised', 'error'); return; }
     if (!versionControl.canUndo()) { showStatus('Nothing to undo', 'info'); return; }
     const version = versionControl.undo();
     if (version) {
@@ -3384,7 +3384,7 @@ function performUndo() {
 }
 
 function performRedo() {
-    if (!versionControl) { showStatus('Version control not initialized', 'error'); return; }
+    if (!versionControl) { showStatus('Version control not initialised', 'error'); return; }
     if (!versionControl.canRedo()) { showStatus('Nothing to redo', 'info'); return; }
     const version = versionControl.redo();
     if (version) {
