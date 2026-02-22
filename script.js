@@ -1372,7 +1372,6 @@ window.onload = function() {
     editTagDropdownInstance = new Dropdown('editTagSelector', 'editTagSelected', 'editTagDropdown');
     batchTagFilterDropdownInstance = new Dropdown('batchTagFilterSelector', 'batchTagFilterSelected', 'batchTagFilterDropdown');
     batchTagActionDropdownInstance = new Dropdown('batchTagActionSelector', 'batchTagActionSelected', 'batchTagActionDropdown');
-    quizTagDropdownInstance = new Dropdown('quizTagSelector', 'quizTagSelected', 'quizTagDropdown');
 
     // Refresh tag options when dropdown opens
     const tagSelectedEl = document.getElementById('tagSelected');
@@ -1391,10 +1390,6 @@ window.onload = function() {
     if (batchTagActionSelectedEl) {
         batchTagActionSelectedEl.addEventListener('click', () => renderTagSelector('batchAction'));
     }
-    const quizTagSelectedEl = document.getElementById('quizTagSelected');
-    if (quizTagSelectedEl) {
-        quizTagSelectedEl.addEventListener('click', () => renderTagSelector('quiz'));
-    }
 
     Dropdown.register(posDropdown);
     Dropdown.register(weightDropdown);
@@ -1404,7 +1399,6 @@ window.onload = function() {
     Dropdown.register(editTagDropdownInstance);
     Dropdown.register(batchTagFilterDropdownInstance);
     Dropdown.register(batchTagActionDropdownInstance);
-    Dropdown.register(quizTagDropdownInstance);
 
     // Initialize batch toolbar
     updateBatchToolbar();
@@ -1709,7 +1703,6 @@ const TAG_SELECTORS = {
     edit:        { selectedId: 'editTagSelected', listId: 'editTagOptionsList', inputId: 'editTagNewInput', multi: true, placeholder: 'Tags' },
     batchFilter: { selectedId: 'batchTagFilterSelected', listId: 'batchTagFilterOptionsList', inputId: null, multi: false, placeholder: 'Tag' },
     batchAction: { selectedId: 'batchTagActionSelected', listId: 'batchTagActionOptionsList', inputId: 'batchTagActionNewInput', multi: true, placeholder: 'Tag' },
-    quiz:        { selectedId: 'quizTagSelected', listId: 'quizTagOptionsList', inputId: null, multi: false, placeholder: 'All tags' },
 };
 
 let tagSelectorState = {
@@ -1717,13 +1710,10 @@ let tagSelectorState = {
     edit: [],        // tag ID array
     batchFilter: '', // single tag ID
     batchAction: [], // tag ID array
-    quiz: '',        // single tag ID (optional filter)
 };
 
-let quizTagDropdownInstance = null;
-
 function getTagDropdownInstance(key) {
-    return { add: tagDropdownInstance, edit: editTagDropdownInstance, batchFilter: batchTagFilterDropdownInstance, batchAction: batchTagActionDropdownInstance, quiz: quizTagDropdownInstance }[key];
+    return { add: tagDropdownInstance, edit: editTagDropdownInstance, batchFilter: batchTagFilterDropdownInstance, batchAction: batchTagActionDropdownInstance }[key];
 }
 
 function renderTagSelector(key) {
@@ -4650,60 +4640,40 @@ function findDistractors(targetWord, allWords, count = 3) {
 
 // --- Quiz setup ---
 function openQuizSetup() {
-    tagSelectorState.quiz = '';
-    renderTagSelector('quiz');
     _updateQuizSetupInfo();
     document.getElementById('quizSetupModal').classList.add('active');
+
+    // Preload pronunciation for all quiz pool words in the background
+    if (appSettings.audioPreloadEnabled) {
+        const pool = _getQuizPool();
+        pool.forEach(w => preloadAudioForWord(w.word));
+    }
 }
 
 function closeQuizSetup() {
     document.getElementById('quizSetupModal').classList.remove('active');
 }
 
+// Pool = selectedWords (if any are selected) OR all words with meanings
 function _getQuizPool() {
-    const minRaw = document.getElementById('quizWeightMin').value.trim();
-    const maxRaw = document.getElementById('quizWeightMax').value.trim();
-    const weightMin = minRaw === '' ? -3 : parseInt(minRaw, 10);
-    const weightMax = maxRaw === '' ? 10 : parseInt(maxRaw, 10);
-    const tagId = tagSelectorState.quiz;
-
-    let pool = words.filter(w =>
-        w.weight >= weightMin && w.weight <= weightMax &&
-        (w.meaning || '').trim() !== ''
-    );
-    if (tagId) {
-        pool = pool.filter(w => (w.tags || []).includes(tagId));
+    if (isSelectMode && selectedWords.size > 0) {
+        return Array.from(selectedWords)
+            .map(i => words[i])
+            .filter(w => w && (w.meaning || '').trim() !== '');
     }
-    return pool;
+    return words.filter(w => (w.meaning || '').trim() !== '');
 }
 
 function _updateQuizSetupInfo() {
     const pool = _getQuizPool();
     const infoEl = document.getElementById('quizSetupInfo');
-    if (infoEl) infoEl.textContent = `${pool.length} word(s) available`;
-}
-
-// Live update info when inputs change
-(function () {
-    const ids = ['quizWeightMin', 'quizWeightMax', 'quizCountInput'];
-    function onLoad() {
-        ids.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.addEventListener('input', _updateQuizSetupInfo);
-        });
-        const quizTagSelectedEl = document.getElementById('quizTagSelected');
-        if (quizTagSelectedEl) {
-            quizTagSelectedEl.addEventListener('click', () => {
-                setTimeout(_updateQuizSetupInfo, 50);
-            });
-        }
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', onLoad);
+    if (!infoEl) return;
+    if (isSelectMode && selectedWords.size > 0) {
+        infoEl.textContent = `${pool.length} selected word(s)`;
     } else {
-        onLoad();
+        infoEl.textContent = `${pool.length} word(s) available`;
     }
-})();
+}
 
 function startQuiz() {
     const modeEl = document.querySelector('input[name="quizMode"]:checked');
@@ -4752,6 +4722,13 @@ function _showQuizQuestion() {
     const total = quizState.words.length;
     const current = quizState.currentIndex + 1;
     quizState.answered = false;
+
+    // Preload audio for current word (and next)
+    if (appSettings.audioPreloadEnabled) {
+        preloadAudioForWord(w.word);
+        const next = quizState.words[quizState.currentIndex + 1];
+        if (next) preloadAudioForWord(next.word);
+    }
 
     document.getElementById('quizProgress').textContent = `${current} / ${total}`;
     document.getElementById('quizResultArea').style.display = 'none';

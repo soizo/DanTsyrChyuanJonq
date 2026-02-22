@@ -449,30 +449,9 @@
     </div>
 
     <!-- Quiz Setup Modal -->
-    <div id="quizSetupModal" class="modal">
+    <div id="quizSetupModal" class="modal modal-quiz">
         <div class="modal-content">
             <div class="modal-header">Quiz</div>
-
-            <div class="form-row">
-                <label>Scope — Weight</label>
-                <div class="quiz-range-row">
-                    <input type="number" id="quizWeightMin" class="range-input" value="1" min="-3" placeholder="min">
-                    <span class="range-separator">~</span>
-                    <input type="number" id="quizWeightMax" class="range-input" placeholder="∞">
-                </div>
-            </div>
-
-            <div class="form-row">
-                <label>Scope — Tag</label>
-                <div class="dropdown-container tag-selector" id="quizTagSelector">
-                    <div class="dropdown-selected tag-selected" id="quizTagSelected">
-                        <span class="tag-placeholder">All tags</span>
-                    </div>
-                    <div class="dropdown-menu tag-dropdown" id="quizTagDropdown">
-                        <div id="quizTagOptionsList" class="tag-options-list"></div>
-                    </div>
-                </div>
-            </div>
 
             <div class="form-row">
                 <label>Mode</label>
@@ -505,7 +484,7 @@
     </div>
 
     <!-- Quiz Question Modal -->
-    <div id="quizQuestionModal" class="modal">
+    <div id="quizQuestionModal" class="modal modal-quiz">
         <div class="modal-content quiz-question-content">
             <div class="quiz-progress-row">
                 <span id="quizProgress" class="quiz-progress-label"></span>
@@ -515,9 +494,11 @@
             <!-- Spelling mode -->
             <div id="quizSpellingSection">
                 <div class="quiz-hint-label">What is the word?</div>
-                <div id="quizMeaningDisplay" class="quiz-big-text"></div>
+                <div class="quiz-word-line">
+                    <div id="quizMeaningDisplay" class="quiz-big-text"></div>
+                    <button class="btn-pronounce quiz-pronounce-btn" onclick="pronounceQuizWord()" title="Pronounce (British)" aria-label="Pronounce (British)"><svg class="icon-speaker" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 10v4c0 1.1.9 2 2 2h2.35l3.38 2.7c.93.74 2.27.08 2.27-1.1V6.4c0-1.18-1.34-1.84-2.27-1.1L7.35 8H5c-1.1 0-2 .9-2 2Zm14.5 2c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03ZM15 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/></svg></button>
+                </div>
                 <div id="quizPosDisplay" class="quiz-pos-text"></div>
-                <button class="quiz-pronounce-btn btn-secondary" onclick="pronounceQuizWord()">Pronounce</button>
                 <div class="quiz-input-row">
                     <input type="text" id="quizSpellingInput" class="quiz-spelling-input" placeholder="Type the word…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" onkeydown="quizSpellingKeydown(event)">
                     <button class="btn-primary quiz-check-btn" onclick="checkSpelling()">Check</button>
@@ -527,9 +508,11 @@
             <!-- Multiple choice mode -->
             <div id="quizMCSection" style="display:none">
                 <div class="quiz-hint-label">Choose the correct meaning:</div>
-                <div id="quizWordDisplay" class="quiz-big-text"></div>
+                <div class="quiz-word-line">
+                    <div id="quizWordDisplay" class="quiz-big-text"></div>
+                    <button class="btn-pronounce quiz-pronounce-btn" onclick="pronounceQuizWord()" title="Pronounce (British)" aria-label="Pronounce (British)"><svg class="icon-speaker" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 10v4c0 1.1.9 2 2 2h2.35l3.38 2.7c.93.74 2.27.08 2.27-1.1V6.4c0-1.18-1.34-1.84-2.27-1.1L7.35 8H5c-1.1 0-2 .9-2 2Zm14.5 2c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03ZM15 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/></svg></button>
+                </div>
                 <div id="quizWordPosDisplay" class="quiz-pos-text"></div>
-                <button class="quiz-pronounce-btn btn-secondary" onclick="pronounceQuizWord()">Pronounce</button>
                 <div id="quizChoices" class="quiz-choices"></div>
             </div>
 
@@ -545,7 +528,7 @@
     </div>
 
     <!-- Quiz End Modal -->
-    <div id="quizEndModal" class="modal">
+    <div id="quizEndModal" class="modal modal-quiz">
         <div class="modal-content">
             <div class="modal-header">Quiz Complete</div>
 

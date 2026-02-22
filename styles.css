@@ -2534,6 +2534,11 @@ body.is-resizing-layout * {
 	min-height: 1.4em;
 }
 
+/* Opaque backdrop for quiz modals (prevents seeing word list behind) */
+.modal.modal-quiz {
+	background: var(--color-bg);
+}
+
 /* Question modal */
 .quiz-question-content {
 	max-width: 520px;
@@ -2585,19 +2590,33 @@ body.is-resizing-layout * {
 	word-break: break-word;
 }
 
+.quiz-word-line {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-xs);
+}
+
+.quiz-word-line .quiz-big-text {
+	flex: 1;
+}
+
+.quiz-word-line .btn-pronounce {
+	flex-shrink: 0;
+	margin: 4px 0 0 0;
+	opacity: 0.5;
+}
+
+.quiz-word-line .btn-pronounce .icon-speaker {
+	width: 18px;
+	height: 18px;
+}
+
 .quiz-pos-text {
 	font-size: 11px;
 	color: var(--color-text-light);
 	letter-spacing: 0.05em;
 	margin-top: 2px;
 	margin-bottom: var(--space-xs);
-}
-
-.quiz-pronounce-btn {
-	width: auto;
-	margin: var(--space-sm) 0;
-	padding: 6px 14px;
-	font-size: 11px;
 }
 
 .quiz-input-row {
