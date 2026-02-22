@@ -153,10 +153,11 @@ h1 img {
 
 	.mode-switch.is-fixed {
 		position: fixed;
-		top: 0;
+		top: env(safe-area-inset-top);
 		left: 50%;
 		transform: translateX(-50%);
 		width: min(680px, calc(100vw - (var(--space-md) * 2)));
+		background: var(--color-bg);
 	}
 }
 
