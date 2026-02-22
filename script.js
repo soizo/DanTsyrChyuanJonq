@@ -1372,6 +1372,7 @@ window.onload = function() {
     editTagDropdownInstance = new Dropdown('editTagSelector', 'editTagSelected', 'editTagDropdown');
     batchTagFilterDropdownInstance = new Dropdown('batchTagFilterSelector', 'batchTagFilterSelected', 'batchTagFilterDropdown');
     batchTagActionDropdownInstance = new Dropdown('batchTagActionSelector', 'batchTagActionSelected', 'batchTagActionDropdown');
+    quizTagDropdownInstance = new Dropdown('quizTagSelector', 'quizTagSelected', 'quizTagDropdown');
 
     // Refresh tag options when dropdown opens
     const tagSelectedEl = document.getElementById('tagSelected');
@@ -1390,6 +1391,10 @@ window.onload = function() {
     if (batchTagActionSelectedEl) {
         batchTagActionSelectedEl.addEventListener('click', () => renderTagSelector('batchAction'));
     }
+    const quizTagSelectedEl = document.getElementById('quizTagSelected');
+    if (quizTagSelectedEl) {
+        quizTagSelectedEl.addEventListener('click', () => renderTagSelector('quiz'));
+    }
 
     Dropdown.register(posDropdown);
     Dropdown.register(weightDropdown);
@@ -1399,6 +1404,7 @@ window.onload = function() {
     Dropdown.register(editTagDropdownInstance);
     Dropdown.register(batchTagFilterDropdownInstance);
     Dropdown.register(batchTagActionDropdownInstance);
+    Dropdown.register(quizTagDropdownInstance);
 
     // Initialize batch toolbar
     updateBatchToolbar();
@@ -1703,6 +1709,7 @@ const TAG_SELECTORS = {
     edit:        { selectedId: 'editTagSelected', listId: 'editTagOptionsList', inputId: 'editTagNewInput', multi: true, placeholder: 'Tags' },
     batchFilter: { selectedId: 'batchTagFilterSelected', listId: 'batchTagFilterOptionsList', inputId: null, multi: false, placeholder: 'Tag' },
     batchAction: { selectedId: 'batchTagActionSelected', listId: 'batchTagActionOptionsList', inputId: 'batchTagActionNewInput', multi: true, placeholder: 'Tag' },
+    quiz:        { selectedId: 'quizTagSelected', listId: 'quizTagOptionsList', inputId: null, multi: false, placeholder: 'All tags' },
 };
 
 let tagSelectorState = {
@@ -1710,10 +1717,13 @@ let tagSelectorState = {
     edit: [],        // tag ID array
     batchFilter: '', // single tag ID
     batchAction: [], // tag ID array
+    quiz: '',        // single tag ID (optional filter)
 };
 
+let quizTagDropdownInstance = null;
+
 function getTagDropdownInstance(key) {
-    return { add: tagDropdownInstance, edit: editTagDropdownInstance, batchFilter: batchTagFilterDropdownInstance, batchAction: batchTagActionDropdownInstance }[key];
+    return { add: tagDropdownInstance, edit: editTagDropdownInstance, batchFilter: batchTagFilterDropdownInstance, batchAction: batchTagActionDropdownInstance, quiz: quizTagDropdownInstance }[key];
 }
 
 function renderTagSelector(key) {
@@ -1745,7 +1755,15 @@ function renderTagSelector(key) {
     const listEl = document.getElementById(cfg.listId);
     if (listEl) {
         const selectedSet = cfg.multi ? new Set(state || []) : new Set(state ? [state] : []);
-        listEl.innerHTML = tagRegistry.map(tag => {
+
+        // For single-select optional filters (e.g. quiz), prepend an "All" clear option
+        let clearOptionHtml = '';
+        if (!cfg.multi && cfg.placeholder) {
+            const clearSelected = !state ? 'selected' : '';
+            clearOptionHtml = `<label class="dropdown-option tag-option ${clearSelected}" data-value="">${cfg.placeholder}</label>`;
+        }
+
+        listEl.innerHTML = clearOptionHtml + tagRegistry.map(tag => {
             const isSelected = selectedSet.has(tag.id) ? 'selected' : '';
             return `<label class="dropdown-option tag-option ${isSelected}" data-value="${tag.id}">${tag.name}</label>`;
         }).join('');
@@ -4583,6 +4601,370 @@ bindModalBackdropPressReleaseClose(
 bindModalBackdropPressReleaseClose(
     document.getElementById('historyModal'),
     closeHistoryModal
+);
+
+// ========================================
+// Quiz Mode
+// ========================================
+
+let quizState = null;
+
+// --- Levenshtein distance ---
+function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    const dp = [];
+    for (let i = 0; i <= m; i++) {
+        dp[i] = new Array(n + 1);
+        dp[i][0] = i;
+    }
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            dp[i][j] = a[i - 1] === b[j - 1]
+                ? dp[i - 1][j - 1]
+                : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+        }
+    }
+    return dp[m][n];
+}
+
+// --- Find distractors (similar-looking words) ---
+function findDistractors(targetWord, allWords, count = 3) {
+    const others = allWords.filter(w => w !== targetWord && (w.meaning || '').trim());
+    if (others.length <= count) return others;
+
+    // Sort by character similarity (Levenshtein), then add randomness
+    const scored = others.map(w => ({
+        w,
+        dist: levenshtein(w.word.toLowerCase(), targetWord.word.toLowerCase())
+    }));
+    scored.sort((a, b) => a.dist - b.dist);
+
+    // Take closest 2× count candidates, shuffle, pick count
+    const candidates = scored.slice(0, Math.min(count * 4, scored.length));
+    candidates.sort(() => Math.random() - 0.5);
+    return candidates.slice(0, count).map(x => x.w);
+}
+
+// --- Quiz setup ---
+function openQuizSetup() {
+    tagSelectorState.quiz = '';
+    renderTagSelector('quiz');
+    _updateQuizSetupInfo();
+    document.getElementById('quizSetupModal').classList.add('active');
+}
+
+function closeQuizSetup() {
+    document.getElementById('quizSetupModal').classList.remove('active');
+}
+
+function _getQuizPool() {
+    const minRaw = document.getElementById('quizWeightMin').value.trim();
+    const maxRaw = document.getElementById('quizWeightMax').value.trim();
+    const weightMin = minRaw === '' ? -3 : parseInt(minRaw, 10);
+    const weightMax = maxRaw === '' ? 10 : parseInt(maxRaw, 10);
+    const tagId = tagSelectorState.quiz;
+
+    let pool = words.filter(w =>
+        w.weight >= weightMin && w.weight <= weightMax &&
+        (w.meaning || '').trim() !== ''
+    );
+    if (tagId) {
+        pool = pool.filter(w => (w.tags || []).includes(tagId));
+    }
+    return pool;
+}
+
+function _updateQuizSetupInfo() {
+    const pool = _getQuizPool();
+    const infoEl = document.getElementById('quizSetupInfo');
+    if (infoEl) infoEl.textContent = `${pool.length} word(s) available`;
+}
+
+// Live update info when inputs change
+(function () {
+    const ids = ['quizWeightMin', 'quizWeightMax', 'quizCountInput'];
+    function onLoad() {
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', _updateQuizSetupInfo);
+        });
+        const quizTagSelectedEl = document.getElementById('quizTagSelected');
+        if (quizTagSelectedEl) {
+            quizTagSelectedEl.addEventListener('click', () => {
+                setTimeout(_updateQuizSetupInfo, 50);
+            });
+        }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', onLoad);
+    } else {
+        onLoad();
+    }
+})();
+
+function startQuiz() {
+    const modeEl = document.querySelector('input[name="quizMode"]:checked');
+    const mode = modeEl ? modeEl.value : 'spelling';
+    const countRaw = document.getElementById('quizCountInput').value.trim();
+    const count = parseInt(countRaw) || 0;
+
+    let pool = _getQuizPool();
+
+    if (pool.length === 0) {
+        showStatus('No words match the criteria', 'error');
+        return;
+    }
+    if (mode === 'mc' && words.filter(w => (w.meaning || '').trim()).length < 4) {
+        showStatus('Need at least 4 words with meanings for multiple choice', 'error');
+        return;
+    }
+
+    // Shuffle
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    const quizWords = count > 0 ? shuffled.slice(0, count) : shuffled;
+
+    quizState = {
+        mode,
+        words: quizWords,
+        currentIndex: 0,
+        results: [],      // { wordRef, correct, userAnswer }
+        answered: false,
+        currentChoices: null,
+        correctChoiceIndex: -1
+    };
+
+    closeQuizSetup();
+    _showQuizQuestion();
+}
+
+function _showQuizQuestion() {
+    if (!quizState) return;
+
+    if (quizState.currentIndex >= quizState.words.length) {
+        _endQuiz();
+        return;
+    }
+
+    const w = quizState.words[quizState.currentIndex];
+    const total = quizState.words.length;
+    const current = quizState.currentIndex + 1;
+    quizState.answered = false;
+
+    document.getElementById('quizProgress').textContent = `${current} / ${total}`;
+    document.getElementById('quizResultArea').style.display = 'none';
+    document.getElementById('quizRevealRow').style.display = 'none';
+    document.getElementById('quizNextBtn').style.display = 'none';
+
+    if (quizState.mode === 'spelling') {
+        document.getElementById('quizSpellingSection').style.display = '';
+        document.getElementById('quizMCSection').style.display = 'none';
+
+        const posArray = Array.isArray(w.pos) ? w.pos : (w.pos ? [w.pos] : []);
+        document.getElementById('quizMeaningDisplay').textContent = w.meaning;
+        document.getElementById('quizPosDisplay').textContent =
+            posArray.length > 0 ? posArray.map(p => p + '.').join(' ') : '';
+        document.getElementById('quizSpellingInput').value = '';
+        setTimeout(() => document.getElementById('quizSpellingInput').focus(), 80);
+    } else {
+        document.getElementById('quizSpellingSection').style.display = 'none';
+        document.getElementById('quizMCSection').style.display = '';
+
+        const posArray = Array.isArray(w.pos) ? w.pos : (w.pos ? [w.pos] : []);
+        document.getElementById('quizWordDisplay').textContent = w.word;
+        document.getElementById('quizWordPosDisplay').textContent =
+            posArray.length > 0 ? posArray.map(p => p + '.').join(' ') : '';
+
+        // Build choices: 1 correct + 3 distractors, shuffled
+        const allWithMeaning = words.filter(wd => (wd.meaning || '').trim());
+        const distractors = findDistractors(w, allWithMeaning, 3);
+        // Ensure we have 4 choices (pad with random if needed)
+        while (distractors.length < 3) {
+            const extra = allWithMeaning.find(wd => wd !== w && !distractors.includes(wd));
+            if (extra) distractors.push(extra);
+            else break;
+        }
+        const choices = [w, ...distractors].sort(() => Math.random() - 0.5);
+        quizState.currentChoices = choices;
+        quizState.correctChoiceIndex = choices.indexOf(w);
+
+        const choicesEl = document.getElementById('quizChoices');
+        choicesEl.innerHTML = choices.map((c, i) =>
+            `<button class="quiz-choice-btn" onclick="handleMCChoice(${i})">${c.meaning}</button>`
+        ).join('');
+    }
+
+    document.getElementById('quizQuestionModal').classList.add('active');
+}
+
+function pronounceQuizWord() {
+    if (!quizState) return;
+    const w = quizState.words[quizState.currentIndex];
+    if (w) pronounceWord(w.word);
+}
+
+function quizSpellingKeydown(event) {
+    if (event.key === 'Enter') {
+        if (!quizState || quizState.answered) {
+            nextQuizQuestion();
+        } else {
+            checkSpelling();
+        }
+    }
+}
+
+function checkSpelling() {
+    if (!quizState || quizState.answered) return;
+
+    const w = quizState.words[quizState.currentIndex];
+    const input = document.getElementById('quizSpellingInput').value.trim().toLowerCase();
+    const correct = input === w.word.toLowerCase();
+
+    quizState.answered = true;
+    quizState.results.push({ wordRef: w, correct, userAnswer: input });
+    _showAnswerFeedback(correct, w.word);
+}
+
+function handleMCChoice(index) {
+    if (!quizState || quizState.answered) return;
+
+    const w = quizState.words[quizState.currentIndex];
+    const correct = index === quizState.correctChoiceIndex;
+
+    quizState.answered = true;
+    const chosenWord = quizState.currentChoices[index];
+    quizState.results.push({ wordRef: w, correct, userAnswer: chosenWord ? chosenWord.word : '' });
+
+    // Visually highlight choices
+    const buttons = document.querySelectorAll('.quiz-choice-btn');
+    buttons.forEach((btn, i) => {
+        if (i === quizState.correctChoiceIndex) {
+            btn.classList.add('quiz-choice-correct');
+        } else if (i === index && !correct) {
+            btn.classList.add('quiz-choice-wrong');
+        }
+        btn.disabled = true;
+    });
+
+    _showAnswerFeedback(correct, w.word);
+}
+
+function _showAnswerFeedback(correct, correctWord) {
+    const resultArea = document.getElementById('quizResultArea');
+    resultArea.style.display = '';
+    resultArea.className = 'quiz-result-area ' + (correct ? 'quiz-correct' : 'quiz-wrong');
+    resultArea.textContent = correct ? 'Correct!' : `Incorrect`;
+
+    if (!correct) {
+        const revealRow = document.getElementById('quizRevealRow');
+        const revealWord = document.getElementById('quizRevealWord');
+        revealRow.style.display = '';
+        revealWord.textContent = correctWord;
+    }
+
+    document.getElementById('quizNextBtn').style.display = '';
+    document.getElementById('quizNextBtn').focus();
+}
+
+function nextQuizQuestion() {
+    if (!quizState) return;
+    quizState.currentIndex++;
+    _showQuizQuestion();
+}
+
+function abandonQuiz() {
+    document.getElementById('quizQuestionModal').classList.remove('active');
+    quizState = null;
+}
+
+function _endQuiz() {
+    document.getElementById('quizQuestionModal').classList.remove('active');
+    if (!quizState) return;
+
+    const total = quizState.results.length;
+    const correctCount = quizState.results.filter(r => r.correct).length;
+    const wrongCount = total - correctCount;
+
+    document.getElementById('quizEndScore').textContent = `${correctCount} / ${total}`;
+
+    // Wrong words
+    const wrongResults = quizState.results.filter(r => !r.correct);
+    const wrongSection = document.getElementById('quizEndWrongSection');
+    const wrongListEl = document.getElementById('quizEndWrongList');
+    const wrongBtn = document.getElementById('quizEndAdjustWrongBtn');
+    if (wrongResults.length > 0) {
+        wrongListEl.innerHTML = wrongResults.map(r =>
+            `<span class="quiz-end-word quiz-end-word-wrong">${r.wordRef.word}</span>`
+        ).join('');
+        wrongBtn.textContent = `+1 weight for wrong (${wrongCount})`;
+        wrongBtn.disabled = false;
+        wrongSection.style.display = '';
+    } else {
+        wrongSection.style.display = 'none';
+    }
+
+    // Correct words
+    const correctResults = quizState.results.filter(r => r.correct);
+    const correctSection = document.getElementById('quizEndCorrectSection');
+    const correctListEl = document.getElementById('quizEndCorrectList');
+    const correctBtn = document.getElementById('quizEndAdjustCorrectBtn');
+    if (correctResults.length > 0) {
+        correctListEl.innerHTML = correctResults.map(r =>
+            `<span class="quiz-end-word quiz-end-word-correct">${r.wordRef.word}</span>`
+        ).join('');
+        correctBtn.textContent = `-1 weight for correct (${correctCount})`;
+        correctBtn.disabled = false;
+        correctSection.style.display = '';
+    } else {
+        correctSection.style.display = 'none';
+    }
+
+    document.getElementById('quizEndModal').classList.add('active');
+}
+
+function adjustQuizWeights(delta, type) {
+    if (!quizState) return;
+    const targetResults = quizState.results.filter(r => type === 'wrong' ? !r.correct : r.correct);
+    let adjusted = 0;
+
+    targetResults.forEach(result => {
+        const wordRef = result.wordRef;
+        const idx = words.indexOf(wordRef);
+        if (idx !== -1) {
+            const newWeight = words[idx].weight + delta;
+            if (newWeight >= -2 && newWeight <= 10) {
+                words[idx].weight = newWeight;
+                adjusted++;
+            }
+        }
+    });
+
+    if (adjusted > 0) {
+        const sign = delta > 0 ? '+1' : '-1';
+        saveData(false, `Quiz ${sign} × ${adjusted}`);
+        renderWords();
+        showStatus(`Weight ${delta > 0 ? 'increased' : 'decreased'} for ${adjusted} word(s)`, 'success');
+    }
+
+    const btnId = type === 'wrong' ? 'quizEndAdjustWrongBtn' : 'quizEndAdjustCorrectBtn';
+    const btn = document.getElementById(btnId);
+    if (btn) btn.disabled = true;
+}
+
+function closeQuizEnd() {
+    document.getElementById('quizEndModal').classList.remove('active');
+    quizState = null;
+}
+
+bindModalBackdropPressReleaseClose(
+    document.getElementById('quizSetupModal'),
+    closeQuizSetup
+);
+bindModalBackdropPressReleaseClose(
+    document.getElementById('quizEndModal'),
+    closeQuizEnd
 );
 
 initInPageConfirmModal();

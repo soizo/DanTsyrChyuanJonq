@@ -110,6 +110,7 @@
                     <button class="btn-secondary" id="selectModeBtn" onclick="toggleSelectMode()">Select Words</button>
                     <button class="btn-secondary" id="sortModeBtn" onclick="toggleSortMode()">A-Z</button>
                     <button class="btn-secondary" id="groupModeBtn" onclick="toggleGroupMode()">By Weight</button>
+                    <button class="btn-secondary" id="quizModeBtn" onclick="openQuizSetup()">Quiz</button>
                     <button class="btn-secondary" onclick="openSettingsModal()">Settings</button>
                     <input type="file" id="importFile" accept=".json" onchange="importData(event)">
                 </div>
@@ -443,6 +444,127 @@
             <div class="registry-statusbar">
                 <span id="registryStatusLeft"></span>
                 <span id="registryStatusRight"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quiz Setup Modal -->
+    <div id="quizSetupModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Quiz</div>
+
+            <div class="form-row">
+                <label>Scope — Weight</label>
+                <div class="quiz-range-row">
+                    <input type="number" id="quizWeightMin" class="range-input" value="1" min="-3" placeholder="min">
+                    <span class="range-separator">~</span>
+                    <input type="number" id="quizWeightMax" class="range-input" placeholder="∞">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Scope — Tag</label>
+                <div class="dropdown-container tag-selector" id="quizTagSelector">
+                    <div class="dropdown-selected tag-selected" id="quizTagSelected">
+                        <span class="tag-placeholder">All tags</span>
+                    </div>
+                    <div class="dropdown-menu tag-dropdown" id="quizTagDropdown">
+                        <div id="quizTagOptionsList" class="tag-options-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Mode</label>
+                <div class="quiz-mode-options">
+                    <label class="quiz-mode-option">
+                        <input type="radio" name="quizMode" value="spelling" checked>
+                        <span class="quiz-mode-label">Spelling</span>
+                        <span class="quiz-mode-desc">See meaning → type the word</span>
+                    </label>
+                    <label class="quiz-mode-option">
+                        <input type="radio" name="quizMode" value="mc">
+                        <span class="quiz-mode-label">Multiple Choice</span>
+                        <span class="quiz-mode-desc">See word → choose correct meaning</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>Count</label>
+                <input type="number" id="quizCountInput" class="range-input" min="1" placeholder="All">
+            </div>
+
+            <div id="quizSetupInfo" class="quiz-setup-info"></div>
+
+            <div class="modal-actions">
+                <button class="btn-primary" onclick="startQuiz()">Start</button>
+                <button class="btn-secondary" onclick="closeQuizSetup()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quiz Question Modal -->
+    <div id="quizQuestionModal" class="modal">
+        <div class="modal-content quiz-question-content">
+            <div class="quiz-progress-row">
+                <span id="quizProgress" class="quiz-progress-label"></span>
+                <button class="quiz-abandon-btn btn-secondary" onclick="abandonQuiz()">✕</button>
+            </div>
+
+            <!-- Spelling mode -->
+            <div id="quizSpellingSection">
+                <div class="quiz-hint-label">What is the word?</div>
+                <div id="quizMeaningDisplay" class="quiz-big-text"></div>
+                <div id="quizPosDisplay" class="quiz-pos-text"></div>
+                <button class="quiz-pronounce-btn btn-secondary" onclick="pronounceQuizWord()">Pronounce</button>
+                <div class="quiz-input-row">
+                    <input type="text" id="quizSpellingInput" class="quiz-spelling-input" placeholder="Type the word…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" onkeydown="quizSpellingKeydown(event)">
+                    <button class="btn-primary quiz-check-btn" onclick="checkSpelling()">Check</button>
+                </div>
+            </div>
+
+            <!-- Multiple choice mode -->
+            <div id="quizMCSection" style="display:none">
+                <div class="quiz-hint-label">Choose the correct meaning:</div>
+                <div id="quizWordDisplay" class="quiz-big-text"></div>
+                <div id="quizWordPosDisplay" class="quiz-pos-text"></div>
+                <button class="quiz-pronounce-btn btn-secondary" onclick="pronounceQuizWord()">Pronounce</button>
+                <div id="quizChoices" class="quiz-choices"></div>
+            </div>
+
+            <!-- Result area -->
+            <div id="quizResultArea" class="quiz-result-area" style="display:none"></div>
+
+            <div id="quizRevealRow" style="display:none">
+                <div id="quizRevealWord" class="quiz-reveal-word"></div>
+            </div>
+
+            <button id="quizNextBtn" class="btn-primary" style="display:none" onclick="nextQuizQuestion()">Next →</button>
+        </div>
+    </div>
+
+    <!-- Quiz End Modal -->
+    <div id="quizEndModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Quiz Complete</div>
+
+            <div class="quiz-end-score" id="quizEndScore"></div>
+
+            <div id="quizEndWrongSection" class="quiz-end-section">
+                <div class="quiz-end-section-label quiz-end-label-wrong">Wrong</div>
+                <div id="quizEndWrongList" class="quiz-end-word-list"></div>
+                <button class="btn-secondary quiz-adjust-btn" id="quizEndAdjustWrongBtn" onclick="adjustQuizWeights(1,'wrong')">+1 weight (wrong answers)</button>
+            </div>
+
+            <div id="quizEndCorrectSection" class="quiz-end-section">
+                <div class="quiz-end-section-label quiz-end-label-correct">Correct</div>
+                <div id="quizEndCorrectList" class="quiz-end-word-list"></div>
+                <button class="btn-secondary quiz-adjust-btn" id="quizEndAdjustCorrectBtn" onclick="adjustQuizWeights(-1,'correct')">-1 weight (correct answers)</button>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn-primary" onclick="closeQuizEnd()">Done</button>
             </div>
         </div>
     </div>
