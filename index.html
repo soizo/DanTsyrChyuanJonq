@@ -350,6 +350,13 @@
                         </div>
                         <input type="checkbox" id="audioPreloadEnabledInput" aria-label="Word preload">
                     </div>
+                    <div class="settings-toggle-item">
+                        <div class="settings-toggle-copy">
+                            <label class="settings-toggle-title" for="quizAutoPlayInput">Quiz Auto-Play</label>
+                            <div class="settings-toggle-desc">Automatically pronounce each word when it appears in quiz mode.</div>
+                        </div>
+                        <input type="checkbox" id="quizAutoPlayInput" aria-label="Quiz auto-play">
+                    </div>
                 </div>
             </div>
 
@@ -525,7 +532,10 @@
                 <div id="quizRevealWord" class="quiz-reveal-word"></div>
             </div>
 
-            <button id="quizNextBtn" class="btn-primary" style="display:none" onclick="nextQuizQuestion()">Next →</button>
+            <div class="quiz-bottom-row">
+                <button id="quizSkipBtn" class="btn-secondary quiz-skip-btn" onclick="skipQuizQuestion()">Skip</button>
+                <button id="quizNextBtn" class="btn-primary quiz-next-btn" style="display:none" onclick="nextQuizQuestion()">Next →</button>
+            </div>
         </div>
     </div>
 

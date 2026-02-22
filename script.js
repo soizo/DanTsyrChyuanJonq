@@ -595,7 +595,8 @@ const APP_SETTINGS_KEY = 'wordMemoryAppSettings';
 const DEFAULT_APP_SETTINGS = {
     actionSoundEnabled: true,
     audioPreloadEnabled: true,
-    pronounceVolume: 1
+    pronounceVolume: 1,
+    quizAutoPlay: false
 };
 
 function createProjectId() {
@@ -645,10 +646,15 @@ function sanitizeAppSettings(rawSettings) {
         ? Math.max(0, Math.min(1, parsedVolume))
         : DEFAULT_APP_SETTINGS.pronounceVolume;
 
+    const quizAutoPlay = typeof parsed.quizAutoPlay === 'boolean'
+        ? parsed.quizAutoPlay
+        : DEFAULT_APP_SETTINGS.quizAutoPlay;
+
     return {
         actionSoundEnabled,
         audioPreloadEnabled,
-        pronounceVolume
+        pronounceVolume,
+        quizAutoPlay
     };
 }
 
@@ -699,18 +705,137 @@ let excludedTagFilters = new Set(); // tags excluded from display
 let cachedVoices = [];
 let appSettings = sanitizeAppSettings(null);
 
-// Audio preload cache: word -> { url, buffer (decoded AudioBuffer), status }
+const CORE_ASSET_PATHS = [
+    'assets/ding.mp3',
+    'assets/delete.mp3',
+    'assets/put.mp3',
+    'assets/icon.png',
+    'assets/title.png',
+    'assets/webapp.png'
+];
+const CORE_ASSET_CACHE_NAME = 'word-memory-core-assets-v1';
+const WORD_AUDIO_PRELOAD_CONCURRENCY = 3;
+
+// Audio preload cache: word -> { status, url, blobUrl, buffer, promise }
 const audioCache = new Map();
-// status: 'fetching' | 'ready' | 'failed'
+// status: 'idle' | 'fetching' | 'ready' | 'failed'
 let audioPreloadObserver = null;
 let deleteActionSoundAudio = null;
 let putActionSoundAudio = null;
+const preloadedAssetBlobUrls = new Map();
+let coreAssetsWarmupPromise = null;
+const wordAudioPreloadQueue = [];
+const queuedWordAudio = new Set();
+let wordAudioPreloadInFlight = 0;
+
+function normalizeAudioWord(word) {
+    return String(word || '').trim();
+}
+
+function getPreloadedAssetURL(path) {
+    return preloadedAssetBlobUrls.get(path) || path;
+}
+
+async function _cacheAndFetchAsset(path) {
+    if (!path) return null;
+    let response = null;
+
+    if ('caches' in window) {
+        try {
+            const cache = await caches.open(CORE_ASSET_CACHE_NAME);
+            response = await cache.match(path);
+            if (!response) {
+                const fetched = await fetch(path, { cache: 'force-cache' });
+                if (!fetched || !fetched.ok) return null;
+                await cache.put(path, fetched.clone());
+                response = fetched;
+            }
+        } catch (_) {}
+    }
+
+    if (!response) {
+        try {
+            response = await fetch(path, { cache: 'force-cache' });
+        } catch (_) {
+            return null;
+        }
+    }
+
+    if (!response || !response.ok) return null;
+
+    if (/\.(mp3|wav|ogg|m4a)$/i.test(path)) {
+        try {
+            const blob = await response.clone().blob();
+            const blobUrl = URL.createObjectURL(blob);
+            preloadedAssetBlobUrls.set(path, blobUrl);
+        } catch (_) {}
+    }
+
+    return response;
+}
+
+function warmCoreAssets() {
+    if (coreAssetsWarmupPromise) return coreAssetsWarmupPromise;
+    coreAssetsWarmupPromise = Promise.allSettled(CORE_ASSET_PATHS.map(path => _cacheAndFetchAsset(path)));
+    return coreAssetsWarmupPromise;
+}
+
+function _drainWordAudioPreloadQueue() {
+    while (wordAudioPreloadInFlight < WORD_AUDIO_PRELOAD_CONCURRENCY && wordAudioPreloadQueue.length > 0) {
+        const word = wordAudioPreloadQueue.shift();
+        if (!word) continue;
+        wordAudioPreloadInFlight++;
+        preloadAudioForWord(word).finally(() => {
+            queuedWordAudio.delete(word);
+            wordAudioPreloadInFlight = Math.max(0, wordAudioPreloadInFlight - 1);
+            if (wordAudioPreloadQueue.length > 0) {
+                setTimeout(_drainWordAudioPreloadQueue, 0);
+            }
+        });
+    }
+}
+
+function queueWordAudioPreload(word) {
+    const normalizedWord = normalizeAudioWord(word);
+    if (!normalizedWord) return;
+    const existing = audioCache.get(normalizedWord);
+    if (existing && (existing.status === 'ready' || existing.status === 'fetching')) return;
+    if (queuedWordAudio.has(normalizedWord)) return;
+    queuedWordAudio.add(normalizedWord);
+    wordAudioPreloadQueue.push(normalizedWord);
+    _drainWordAudioPreloadQueue();
+}
+
+function scheduleGlobalWordAudioPreload() {
+    if (!appSettings.audioPreloadEnabled) return;
+    words.forEach(w => {
+        if (!w) return;
+        if (!w.word || !(w.meaning || '').trim()) return;
+        queueWordAudioPreload(w.word);
+    });
+}
 
 function preloadAudioForWord(word) {
-    if (audioCache.has(word)) return;
-    audioCache.set(word, { status: 'fetching', url: null, buffer: null });
+    const normalizedWord = normalizeAudioWord(word);
+    if (!normalizedWord) return Promise.resolve(null);
 
-    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(word)}`)
+    let entry = audioCache.get(normalizedWord);
+    if (entry && entry.status === 'ready') return Promise.resolve(entry);
+    if (entry && entry.status === 'fetching' && entry.promise) return entry.promise;
+
+    if (!entry) {
+        entry = {
+            status: 'idle',
+            url: null,
+            blobUrl: null,
+            buffer: null,
+            promise: null
+        };
+        audioCache.set(normalizedWord, entry);
+    }
+
+    entry.status = 'fetching';
+    entry.promise = fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(normalizedWord)}`, { cache: 'force-cache' })
         .then(r => {
             if (!r.ok) throw new Error('API failed');
             return r.json();
@@ -718,33 +843,50 @@ function preloadAudioForWord(word) {
         .then(data => {
             const audioUrl = data[0]?.phonetics?.find(p => p.audio)?.audio;
             if (!audioUrl) throw new Error('No audio URL');
-            const entry = audioCache.get(word);
-            if (!entry) return;
             entry.url = audioUrl;
-            // Prefetch and decode the audio buffer
-            return fetch(audioUrl)
-                .then(r => r.arrayBuffer())
+            return fetch(audioUrl, { cache: 'force-cache' })
+                .then(r => {
+                    if (!r.ok) throw new Error('Audio fetch failed');
+                    return r.arrayBuffer();
+                })
                 .then(buf => {
+                    try {
+                        const blob = new Blob([buf], { type: 'audio/mpeg' });
+                        if (entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+                        entry.blobUrl = URL.createObjectURL(blob);
+                    } catch (_) {}
+
                     const AudioCtx = window.AudioContext || window.webkitAudioContext;
                     if (!AudioCtx) {
                         entry.status = 'ready';
-                        return;
+                        return entry;
                     }
                     const ctx = new AudioCtx();
-                    return ctx.decodeAudioData(buf).then(decoded => {
+                    return ctx.decodeAudioData(buf.slice(0)).then(decoded => {
                         entry.buffer = decoded;
                         entry.status = 'ready';
-                        ctx.close();
+                        return ctx.close().catch(() => {});
                     }).catch(() => {
-                        entry.status = 'ready'; // URL is still valid, just buffer failed
-                        ctx.close();
+                        entry.status = 'ready';
+                        return null;
+                    }).finally(() => {
+                        ctx.close().catch(() => {});
                     });
                 });
         })
+        .then(() => {
+            entry.status = 'ready';
+            return entry;
+        })
         .catch(() => {
-            const entry = audioCache.get(word);
-            if (entry) entry.status = 'failed';
+            entry.status = 'failed';
+            return entry;
+        })
+        .finally(() => {
+            entry.promise = null;
         });
+
+    return entry.promise;
 }
 
 function setupAudioPreloadObserver() {
@@ -762,7 +904,7 @@ function setupAudioPreloadObserver() {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 const word = entry.target.dataset.word;
-                if (word) preloadAudioForWord(word);
+                if (word) queueWordAudioPreload(word);
             }
         });
     }, {
@@ -779,6 +921,7 @@ function setupAudioPreloadObserver() {
 function applyAudioPreloadSetting() {
     if (appSettings.audioPreloadEnabled) {
         setupAudioPreloadObserver();
+        scheduleGlobalWordAudioPreload();
         return;
     }
 
@@ -795,7 +938,8 @@ function playActionSound(actionType) {
     const isPut = actionType === 'put';
     let sound = isPut ? putActionSoundAudio : deleteActionSoundAudio;
     if (!sound) {
-        sound = new Audio(isPut ? 'assets/put.mp3' : 'assets/delete.mp3');
+        const audioPath = isPut ? 'assets/put.mp3' : 'assets/delete.mp3';
+        sound = new Audio(getPreloadedAssetURL(audioPath));
         sound.preload = 'auto';
         if (isPut) {
             putActionSoundAudio = sound;
@@ -2400,10 +2544,13 @@ function interruptCurrentPronunciation() {
 
 // Pronunciation — uses preloaded audio cache for instant playback
 function pronounceWord(word) {
+    const normalizedWord = normalizeAudioWord(word);
+    if (!normalizedWord) return;
+
     const requestId = ++pronunciationRequestId;
     interruptCurrentPronunciation();
 
-    const cached = audioCache.get(word);
+    const cached = audioCache.get(normalizedWord);
 
     // If cache has a decoded buffer, play it instantly via AudioContext
     if (cached && cached.status === 'ready' && cached.buffer) {
@@ -2434,14 +2581,14 @@ function pronounceWord(word) {
                 pronounceSpeechSynthesis(word, requestId);
                 return;
             }
-            showStatus(`Playing "${word}"`, 'info');
+            showStatus(`Playing "${normalizedWord}"`, 'info');
             return;
         }
     }
 
-    // If cache has a URL but no buffer, use Audio element
-    if (cached && cached.status === 'ready' && cached.url) {
-        const audio = new Audio(cached.url);
+    // If cache has a blob URL / URL but no buffer, use Audio element
+    if (cached && cached.status === 'ready' && (cached.blobUrl || cached.url)) {
+        const audio = new Audio(cached.blobUrl || cached.url);
         audio.volume = appSettings.pronounceVolume;
         const stopPlayback = () => {
             audio.onended = null;
@@ -2457,10 +2604,10 @@ function pronounceWord(word) {
             if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
         };
         audio.play().then(() => {
-            showStatus(`Playing "${word}"`, 'info');
+            showStatus(`Playing "${normalizedWord}"`, 'info');
         }).catch(() => {
             if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
-            pronounceSpeechSynthesis(word, requestId);
+            pronounceSpeechSynthesis(normalizedWord, requestId);
         });
         return;
     }
@@ -2470,20 +2617,9 @@ function pronounceWord(word) {
     // loses gesture context, so speechSynthesis would silently fail.
     // On iOS, speak synchronously NOW, then fetch audio in background for next time.
     if (isIOS) {
-        pronounceSpeechSynthesis(word, requestId);
+        pronounceSpeechSynthesis(normalizedWord, requestId);
         // Cache audio in background for future clicks (will hit the cached paths above)
-        fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(word)}`)
-            .then(r => r.ok ? r.json() : null)
-            .then(data => {
-                if (requestId !== pronunciationRequestId) return;
-                if (!data) return;
-                const audioUrl = data[0]?.phonetics?.find(p => p.audio)?.audio;
-                if (audioUrl) {
-                    if (!audioCache.has(word)) audioCache.set(word, { status: 'ready', url: audioUrl, buffer: null });
-                    else { const e = audioCache.get(word); e.url = audioUrl; e.status = 'ready'; }
-                }
-            })
-            .catch(() => {});
+        preloadAudioForWord(normalizedWord).catch(() => {});
         return;
     }
 
@@ -2491,7 +2627,7 @@ function pronounceWord(word) {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     const audioCtx = AudioCtx ? new AudioCtx() : null;
 
-    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(word)}`)
+    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(normalizedWord)}`)
         .then(response => {
             if (!response.ok) throw new Error('API failed');
             return response.json();
@@ -2505,8 +2641,19 @@ function pronounceWord(word) {
             if (!audioUrl) throw new Error('No audio URL');
 
             // Store in cache for future use
-            if (!audioCache.has(word)) audioCache.set(word, { status: 'ready', url: audioUrl, buffer: null });
-            else { const e = audioCache.get(word); e.url = audioUrl; e.status = 'ready'; }
+            if (!audioCache.has(normalizedWord)) {
+                audioCache.set(normalizedWord, {
+                    status: 'ready',
+                    url: audioUrl,
+                    blobUrl: null,
+                    buffer: null,
+                    promise: null
+                });
+            } else {
+                const e = audioCache.get(normalizedWord);
+                e.url = audioUrl;
+                e.status = 'ready';
+            }
 
             if (audioCtx) {
                 return fetch(audioUrl)
@@ -2518,7 +2665,7 @@ function pronounceWord(word) {
                             return;
                         }
                         // Cache the decoded buffer
-                        const entry = audioCache.get(word);
+                        const entry = audioCache.get(normalizedWord);
                         if (entry) entry.buffer = decoded;
                         const source = audioCtx.createBufferSource();
                         source.buffer = decoded;
@@ -2544,7 +2691,7 @@ function pronounceWord(word) {
                             pronounceSpeechSynthesis(word, requestId);
                             return;
                         }
-                        showStatus(`Playing "${word}"`, 'info');
+                        showStatus(`Playing "${normalizedWord}"`, 'info');
                     });
             } else {
                 const audio = new Audio(audioUrl);
@@ -2563,13 +2710,13 @@ function pronounceWord(word) {
                     if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
                 };
                 return audio.play().then(() => {
-                    showStatus(`Playing "${word}"`, 'info');
+                    showStatus(`Playing "${normalizedWord}"`, 'info');
                 });
             }
         })
         .catch(() => {
             if (audioCtx) audioCtx.close().catch(() => {});
-            pronounceSpeechSynthesis(word, requestId);
+            pronounceSpeechSynthesis(normalizedWord, requestId);
         });
 }
 
@@ -3456,6 +3603,7 @@ function openSettingsModal() {
     const settings = versionControl.getSettings();
     const actionSoundEnabledInput = document.getElementById('actionSoundEnabledInput');
     const audioPreloadEnabledInput = document.getElementById('audioPreloadEnabledInput');
+    const quizAutoPlayInput = document.getElementById('quizAutoPlayInput');
     const pronounceVolumeInput = document.getElementById('pronounceVolumeInput');
     document.getElementById('maxVersionsInput').value = settings.maxVersions;
     document.getElementById('projectIdInput').value = getProjectId();
@@ -3464,6 +3612,9 @@ function openSettingsModal() {
     }
     if (audioPreloadEnabledInput) {
         audioPreloadEnabledInput.checked = appSettings.audioPreloadEnabled;
+    }
+    if (quizAutoPlayInput) {
+        quizAutoPlayInput.checked = appSettings.quizAutoPlay;
     }
     if (pronounceVolumeInput) {
         pronounceVolumeInput.value = String(getPronounceVolumePercent());
@@ -3507,11 +3658,13 @@ function isSettingsDirty() {
     const projectIdEl = document.getElementById('projectIdInput');
     const actionSoundEl = document.getElementById('actionSoundEnabledInput');
     const audioPreloadEl = document.getElementById('audioPreloadEnabledInput');
+    const quizAutoPlayEl = document.getElementById('quizAutoPlayInput');
     const pronounceVolumeEl = document.getElementById('pronounceVolumeInput');
     if (maxVersionsEl && maxVersionsEl.value !== _settingsSnapshot.maxVersions) return true;
     if (projectIdEl && projectIdEl.value !== _settingsSnapshot.projectId) return true;
     if (actionSoundEl && actionSoundEl.checked !== _settingsSnapshot.actionSoundEnabled) return true;
     if (audioPreloadEl && audioPreloadEl.checked !== _settingsSnapshot.audioPreloadEnabled) return true;
+    if (quizAutoPlayEl && quizAutoPlayEl.checked !== _settingsSnapshot.quizAutoPlay) return true;
     if (pronounceVolumeEl && pronounceVolumeEl.value !== _settingsSnapshot.pronounceVolume) return true;
     return false;
 }
@@ -3633,10 +3786,12 @@ function saveSettings() {
     const projectIdInput = document.getElementById('projectIdInput');
     const actionSoundEnabledInput = document.getElementById('actionSoundEnabledInput');
     const audioPreloadEnabledInput = document.getElementById('audioPreloadEnabledInput');
+    const quizAutoPlayInput = document.getElementById('quizAutoPlayInput');
     const pronounceVolumeInput = document.getElementById('pronounceVolumeInput');
     const projectId = projectIdInput ? projectIdInput.value.trim() : '';
     const nextActionSoundEnabled = actionSoundEnabledInput ? actionSoundEnabledInput.checked : DEFAULT_APP_SETTINGS.actionSoundEnabled;
     const nextAudioPreloadEnabled = audioPreloadEnabledInput ? audioPreloadEnabledInput.checked : DEFAULT_APP_SETTINGS.audioPreloadEnabled;
+    const nextQuizAutoPlay = quizAutoPlayInput ? quizAutoPlayInput.checked : DEFAULT_APP_SETTINGS.quizAutoPlay;
     const nextPronounceVolumePercent = pronounceVolumeInput ? parseInt(pronounceVolumeInput.value, 10) : 100;
     const nextPronounceVolume = Number.isFinite(nextPronounceVolumePercent) ? Math.max(0, Math.min(1, nextPronounceVolumePercent / 100)) : DEFAULT_APP_SETTINGS.pronounceVolume;
 
@@ -3664,7 +3819,8 @@ function saveSettings() {
     appSettings = sanitizeAppSettings({
         actionSoundEnabled: nextActionSoundEnabled,
         audioPreloadEnabled: nextAudioPreloadEnabled,
-        pronounceVolume: nextPronounceVolume
+        pronounceVolume: nextPronounceVolume,
+        quizAutoPlay: nextQuizAutoPlay
     });
     saveAppSettings();
     applyAudioPreloadSetting();
@@ -4603,6 +4759,19 @@ bindModalBackdropPressReleaseClose(
 // ========================================
 
 let quizState = null;
+let _dingAudio = null;
+
+function _playDing() {
+    if (!_dingAudio) {
+        _dingAudio = new Audio('assets/ding.mp3');
+        _dingAudio.preload = 'auto';
+    }
+    try {
+        _dingAudio.currentTime = 0;
+        const p = _dingAudio.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (_) {}
+}
 
 // --- Levenshtein distance ---
 function levenshtein(a, b) {
@@ -4739,6 +4908,8 @@ function _showQuizQuestion() {
     document.getElementById('quizResultArea').style.display = 'none';
     document.getElementById('quizRevealRow').style.display = 'none';
     document.getElementById('quizNextBtn').style.display = 'none';
+    const skipBtn = document.getElementById('quizSkipBtn');
+    if (skipBtn) skipBtn.style.display = '';
 
     if (quizState.mode === 'spelling') {
         document.getElementById('quizSpellingSection').style.display = '';
@@ -4779,6 +4950,12 @@ function _showQuizQuestion() {
     }
 
     document.getElementById('quizQuestionModal').classList.add('active');
+
+    // Auto-play pronunciation if enabled (only for MC mode where the word is shown,
+    // or spelling mode — user hears the word they need to type)
+    if (appSettings.quizAutoPlay) {
+        setTimeout(() => pronounceQuizWord(), 300);
+    }
 }
 
 function pronounceQuizWord() {
@@ -4796,6 +4973,71 @@ function quizSpellingKeydown(event) {
         }
     }
 }
+
+function _isTypingTarget(target) {
+    if (!target) return false;
+    const tagName = target.tagName;
+    return tagName === 'INPUT' || tagName === 'TEXTAREA' || target.isContentEditable;
+}
+
+function _getQuizChoiceIndexFromKey(event) {
+    const key = event.key;
+    if (key === '1' || event.code === 'Digit1' || event.code === 'Numpad1') return 0;
+    if (key === '2' || event.code === 'Digit2' || event.code === 'Numpad2') return 1;
+    if (key === '3' || event.code === 'Digit3' || event.code === 'Numpad3') return 2;
+    if (key === '4' || event.code === 'Digit4' || event.code === 'Numpad4') return 3;
+    return -1;
+}
+
+function goToPreviousQuizQuestion() {
+    if (!quizState) return;
+    if (quizState.currentIndex <= 0) {
+        showStatus('Already at the first question', 'info');
+        return;
+    }
+
+    const previousIndex = quizState.currentIndex - 1;
+    // Rewind results so previous question can be answered again without duplicate scoring.
+    quizState.results = quizState.results.slice(0, previousIndex);
+    quizState.currentIndex = previousIndex;
+    quizState.answered = false;
+    _showQuizQuestion();
+}
+
+// Global quiz shortcuts: S pronounce, L skip, J previous question, 1-4 choose in MC mode
+document.addEventListener('keydown', function(e) {
+    if (!quizState) return;
+    if (!document.getElementById('quizQuestionModal').classList.contains('active')) return;
+
+    const isTyping = _isTypingTarget(e.target);
+
+    if (!isTyping && (e.key === 'l' || e.key === 'L')) {
+        e.preventDefault();
+        skipQuizQuestion();
+        return;
+    }
+
+    if (!isTyping && (e.key === 'j' || e.key === 'J')) {
+        e.preventDefault();
+        goToPreviousQuizQuestion();
+        return;
+    }
+
+    if (e.key === 's' || e.key === 'S') {
+        if (isTyping) return;
+        e.preventDefault();
+        pronounceQuizWord();
+        return;
+    }
+
+    if (!isTyping && quizState.mode === 'mc' && !quizState.answered) {
+        const choiceIndex = _getQuizChoiceIndexFromKey(e);
+        if (choiceIndex !== -1 && quizState.currentChoices && choiceIndex < quizState.currentChoices.length) {
+            e.preventDefault();
+            handleMCChoice(choiceIndex);
+        }
+    }
+});
 
 function checkSpelling() {
     if (!quizState || quizState.answered) return;
@@ -4837,7 +5079,7 @@ function _showAnswerFeedback(correct, correctWord) {
     const resultArea = document.getElementById('quizResultArea');
     resultArea.style.display = '';
     resultArea.className = 'quiz-result-area ' + (correct ? 'quiz-correct' : 'quiz-wrong');
-    resultArea.textContent = correct ? 'Correct!' : `Incorrect`;
+    resultArea.textContent = correct ? 'Correct!' : 'Incorrect';
 
     if (!correct) {
         const revealRow = document.getElementById('quizRevealRow');
@@ -4845,6 +5087,11 @@ function _showAnswerFeedback(correct, correctWord) {
         revealRow.style.display = '';
         revealWord.textContent = correctWord;
     }
+
+    if (correct) _playDing();
+
+    const skipBtn = document.getElementById('quizSkipBtn');
+    if (skipBtn) skipBtn.style.display = 'none';
 
     document.getElementById('quizNextBtn').style.display = '';
     document.getElementById('quizNextBtn').focus();
@@ -4856,9 +5103,27 @@ function nextQuizQuestion() {
     _showQuizQuestion();
 }
 
+function skipQuizQuestion() {
+    if (!quizState || quizState.answered) return;
+    const w = quizState.words[quizState.currentIndex];
+    quizState.answered = true;
+    quizState.results.push({ wordRef: w, correct: false, userAnswer: '', skipped: true });
+    _showAnswerFeedback(false, w.word);
+}
+
 function abandonQuiz() {
     document.getElementById('quizQuestionModal').classList.remove('active');
     quizState = null;
+}
+
+function _renderQuizEndWordList(listEl, results, cssClass, idPrefix) {
+    listEl.innerHTML = results.map((r, i) => {
+        const id = `${idPrefix}-${i}`;
+        return `<label class="quiz-end-word-row">` +
+            `<input type="checkbox" class="quiz-end-checkbox" id="${id}" checked>` +
+            `<span class="quiz-end-word ${cssClass}">${r.wordRef.word}</span>` +
+            `</label>`;
+    }).join('');
 }
 
 function _endQuiz() {
@@ -4877,9 +5142,7 @@ function _endQuiz() {
     const wrongListEl = document.getElementById('quizEndWrongList');
     const wrongBtn = document.getElementById('quizEndAdjustWrongBtn');
     if (wrongResults.length > 0) {
-        wrongListEl.innerHTML = wrongResults.map(r =>
-            `<span class="quiz-end-word quiz-end-word-wrong">${r.wordRef.word}</span>`
-        ).join('');
+        _renderQuizEndWordList(wrongListEl, wrongResults, 'quiz-end-word-wrong', 'qw');
         wrongBtn.textContent = `+1 weight for wrong (${wrongCount})`;
         wrongBtn.disabled = false;
         wrongSection.style.display = '';
@@ -4893,9 +5156,7 @@ function _endQuiz() {
     const correctListEl = document.getElementById('quizEndCorrectList');
     const correctBtn = document.getElementById('quizEndAdjustCorrectBtn');
     if (correctResults.length > 0) {
-        correctListEl.innerHTML = correctResults.map(r =>
-            `<span class="quiz-end-word quiz-end-word-correct">${r.wordRef.word}</span>`
-        ).join('');
+        _renderQuizEndWordList(correctListEl, correctResults, 'quiz-end-word-correct', 'qc');
         correctBtn.textContent = `-1 weight for correct (${correctCount})`;
         correctBtn.disabled = false;
         correctSection.style.display = '';
@@ -4908,10 +5169,14 @@ function _endQuiz() {
 
 function adjustQuizWeights(delta, type) {
     if (!quizState) return;
-    const targetResults = quizState.results.filter(r => type === 'wrong' ? !r.correct : r.correct);
+
+    const idPrefix = type === 'wrong' ? 'qw' : 'qc';
+    const sourceResults = quizState.results.filter(r => type === 'wrong' ? !r.correct : r.correct);
     let adjusted = 0;
 
-    targetResults.forEach(result => {
+    sourceResults.forEach((result, i) => {
+        const checkbox = document.getElementById(`${idPrefix}-${i}`);
+        if (checkbox && !checkbox.checked) return; // skip unchecked
         const wordRef = result.wordRef;
         const idx = words.indexOf(wordRef);
         if (idx !== -1) {
