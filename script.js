@@ -714,6 +714,7 @@ const CORE_ASSET_PATHS = [
     'assets/webapp.png'
 ];
 const CORE_ASSET_CACHE_NAME = 'word-memory-core-assets-v1';
+const WORD_AUDIO_CACHE_NAME = 'word-memory-word-audio-v1';
 const WORD_AUDIO_PRELOAD_CONCURRENCY = 3;
 
 // Audio preload cache: word -> { status, url, blobUrl, buffer, promise }
@@ -734,6 +735,38 @@ function normalizeAudioWord(word) {
 
 function getPreloadedAssetURL(path) {
     return preloadedAssetBlobUrls.get(path) || path;
+}
+
+function resolveAudioSrc(src) {
+    try {
+        return new URL(src, window.location.href).href;
+    } catch (_) {
+        return src;
+    }
+}
+
+async function fetchWithPersistentCache(url, cacheName) {
+    if (!url) return null;
+
+    if ('caches' in window) {
+        try {
+            const cache = await caches.open(cacheName);
+            const cached = await cache.match(url);
+            if (cached) return cached.clone();
+
+            const fetched = await fetch(url, { cache: 'force-cache' });
+            if (fetched && fetched.ok) {
+                await cache.put(url, fetched.clone());
+            }
+            return fetched;
+        } catch (_) {}
+    }
+
+    try {
+        return await fetch(url, { cache: 'force-cache' });
+    } catch (_) {
+        return null;
+    }
 }
 
 async function _cacheAndFetchAsset(path) {
@@ -835,7 +868,8 @@ function preloadAudioForWord(word) {
     }
 
     entry.status = 'fetching';
-    entry.promise = fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(normalizedWord)}`, { cache: 'force-cache' })
+    const metaUrl = `https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(normalizedWord)}`;
+    entry.promise = fetchWithPersistentCache(metaUrl, WORD_AUDIO_CACHE_NAME)
         .then(r => {
             if (!r.ok) throw new Error('API failed');
             return r.json();
@@ -844,7 +878,7 @@ function preloadAudioForWord(word) {
             const audioUrl = data[0]?.phonetics?.find(p => p.audio)?.audio;
             if (!audioUrl) throw new Error('No audio URL');
             entry.url = audioUrl;
-            return fetch(audioUrl, { cache: 'force-cache' })
+            return fetchWithPersistentCache(audioUrl, WORD_AUDIO_CACHE_NAME)
                 .then(r => {
                     if (!r.ok) throw new Error('Audio fetch failed');
                     return r.arrayBuffer();
@@ -865,7 +899,7 @@ function preloadAudioForWord(word) {
                     return ctx.decodeAudioData(buf.slice(0)).then(decoded => {
                         entry.buffer = decoded;
                         entry.status = 'ready';
-                        return ctx.close().catch(() => {});
+                        return null;
                     }).catch(() => {
                         entry.status = 'ready';
                         return null;
@@ -929,6 +963,8 @@ function applyAudioPreloadSetting() {
         audioPreloadObserver.disconnect();
         audioPreloadObserver = null;
     }
+    wordAudioPreloadQueue.length = 0;
+    queuedWordAudio.clear();
 }
 
 function playActionSound(actionType) {
@@ -2559,6 +2595,19 @@ function pronounceWord(word) {
 
     const cached = audioCache.get(normalizedWord);
 
+    if (!isIOS && cached && cached.status === 'fetching' && cached.promise) {
+        cached.promise.finally(() => {
+            if (requestId !== pronunciationRequestId) return;
+            const latest = audioCache.get(normalizedWord);
+            if (latest && latest.status === 'ready') {
+                pronounceWord(normalizedWord);
+                return;
+            }
+            pronounceSpeechSynthesis(normalizedWord, requestId);
+        });
+        return;
+    }
+
     // If cache has a decoded buffer, play it instantly via AudioContext
     if (cached && cached.status === 'ready' && cached.buffer) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -2585,7 +2634,7 @@ function pronounceWord(word) {
             } catch (_) {
                 if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
                 ctx.close().catch(() => {});
-                pronounceSpeechSynthesis(word, requestId);
+                pronounceSpeechSynthesis(normalizedWord, requestId);
                 return;
             }
             showStatus(`Playing "${normalizedWord}"`, 'info');
@@ -2634,7 +2683,8 @@ function pronounceWord(word) {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     const audioCtx = AudioCtx ? new AudioCtx() : null;
 
-    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(normalizedWord)}`)
+    const metaUrl = `https://api.dictionaryapi.dev/api/v2/entries/en_GB/${encodeURIComponent(normalizedWord)}`;
+    fetchWithPersistentCache(metaUrl, WORD_AUDIO_CACHE_NAME)
         .then(response => {
             if (!response.ok) throw new Error('API failed');
             return response.json();
@@ -2663,7 +2713,7 @@ function pronounceWord(word) {
             }
 
             if (audioCtx) {
-                return fetch(audioUrl)
+                return fetchWithPersistentCache(audioUrl, WORD_AUDIO_CACHE_NAME)
                     .then(r => r.arrayBuffer())
                     .then(buf => audioCtx.decodeAudioData(buf))
                     .then(decoded => {
@@ -2695,7 +2745,7 @@ function pronounceWord(word) {
                         } catch (_) {
                             if (activePronunciationStop === stopPlayback) activePronunciationStop = null;
                             audioCtx.close().catch(() => {});
-                            pronounceSpeechSynthesis(word, requestId);
+                            pronounceSpeechSynthesis(normalizedWord, requestId);
                             return;
                         }
                         showStatus(`Playing "${normalizedWord}"`, 'info');
@@ -3533,12 +3583,23 @@ function _initActionSounds() {
         deleteActionSoundAudio = null;
         putActionSoundAudio = null;
     } else {
+        const deleteSrc = getPreloadedAssetURL('assets/delete.mp3');
+        const putSrc = getPreloadedAssetURL('assets/put.mp3');
+        const resolvedDeleteSrc = resolveAudioSrc(deleteSrc);
+        const resolvedPutSrc = resolveAudioSrc(putSrc);
+
         if (!deleteActionSoundAudio) {
-            deleteActionSoundAudio = new Audio(getPreloadedAssetURL('assets/delete.mp3'));
+            deleteActionSoundAudio = new Audio(deleteSrc);
+            deleteActionSoundAudio.preload = 'auto';
+        } else if (deleteActionSoundAudio.src !== resolvedDeleteSrc) {
+            deleteActionSoundAudio.src = deleteSrc;
             deleteActionSoundAudio.preload = 'auto';
         }
         if (!putActionSoundAudio) {
-            putActionSoundAudio = new Audio(getPreloadedAssetURL('assets/put.mp3'));
+            putActionSoundAudio = new Audio(putSrc);
+            putActionSoundAudio.preload = 'auto';
+        } else if (putActionSoundAudio.src !== resolvedPutSrc) {
+            putActionSoundAudio.src = putSrc;
             putActionSoundAudio.preload = 'auto';
         }
     }
