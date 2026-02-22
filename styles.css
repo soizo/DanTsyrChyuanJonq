@@ -275,7 +275,8 @@ select {
 	touch-action: manipulation;
 }
 
-input[type="checkbox"] {
+input[type="checkbox"],
+input[type="radio"] {
 	-webkit-appearance: none;
 	appearance: none;
 	width: 16px;
@@ -285,14 +286,18 @@ input[type="checkbox"] {
 	background: var(--color-surface);
 	cursor: pointer;
 	outline: none;
+	border-radius: 0;
+	flex-shrink: 0;
 }
 
-input[type="checkbox"]:checked {
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
 	background: var(--color-text);
 	border-color: var(--color-text);
 }
 
-input[type="checkbox"]:focus-visible {
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
 	outline: 2px solid var(--color-text);
 	outline-offset: 2px;
 }
@@ -2495,6 +2500,7 @@ body.is-resizing-layout * {
 	flex-direction: column;
 	gap: var(--space-sm);
 	margin-top: var(--space-sm);
+	user-select: none;
 }
 
 .quiz-mode-option {
@@ -2507,12 +2513,9 @@ body.is-resizing-layout * {
 }
 
 .quiz-mode-option input[type="radio"] {
-	flex-shrink: 0;
-	accent-color: var(--color-text);
 	width: 14px;
 	height: 14px;
-	margin: 0;
-	cursor: pointer;
+	transform: translateY(3px);
 }
 
 .quiz-mode-label {
@@ -2563,10 +2566,17 @@ body.is-resizing-layout * {
 }
 
 .quiz-abandon-btn {
-	width: auto;
+	width: 38px;
+	height: 38px;
+	min-width: 38px;
+	min-height: 38px;
 	margin: 0;
-	padding: 4px 10px;
-	font-size: 13px;
+	padding: 0;
+	font-size: 14px;
+	font-weight: 700;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	border: 1px solid var(--color-border);
 	background: transparent;
 	color: var(--color-text-light);
@@ -2591,9 +2601,9 @@ body.is-resizing-layout * {
 }
 
 .quiz-word-line {
-	display: flex;
-	align-items: flex-start;
-	gap: var(--space-xs);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-xs);
 }
 
 .quiz-word-line .quiz-big-text {
@@ -2623,7 +2633,7 @@ body.is-resizing-layout * {
 	display: flex;
 	gap: var(--space-sm);
 	align-items: stretch;
-	margin-top: var(--space-sm);
+	margin-top: var(--space-lg);
 }
 
 .quiz-spelling-input {
@@ -2651,7 +2661,7 @@ body.is-resizing-layout * {
 	width: auto;
 	margin: 0;
 	padding: 0 var(--space-lg);
-	height: 44px;
+	height: 38px;
 	font-size: 11px;
 }
 

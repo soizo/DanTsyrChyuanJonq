@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <link rel="icon" type="image/png" href="assets/icon.png">
+    <link rel="apple-touch-icon" href="assets/webapp.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Words">
@@ -132,9 +134,9 @@
                         <div class="batch-toolbar-label">Weight:</div>
                         <div class="batch-toolbar-controls">
                             <div class="range-input-group">
-                                <input type="number" id="weightMinInput" class="range-input" value="-3" min="-3">
+                                <input type="number" id="weightMinInput" class="range-input" value="3" min="-3">
                                 <span class="range-separator">~</span>
-                                <input type="number" id="weightMaxInput" class="range-input" placeholder="∞">
+                                <input type="number" id="weightMaxInput" class="range-input" placeholder="∞" min="-3">
                             </div>
                             <button class="btn-batch btn-batch-add" onclick="addWeightRange()">+</button>
                             <button class="btn-batch btn-batch-remove" onclick="removeWeightRange()">−</button>

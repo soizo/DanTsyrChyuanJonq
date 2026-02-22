@@ -3118,6 +3118,7 @@ function importWordsOnly(wordsData, importedTagRegistry) {
     if (versionControl) versionControl.clearHistory();
     saveData(false, `Imported ${processed.length} word(s)`);
     renderWords();
+    updateHistoryButtonLabel();
     if (invalidCount > 0) {
         showStatus(`Imported ${validCount} valid, ${invalidCount} invalid words (version history cleared)`, 'success');
     } else {
@@ -3135,6 +3136,7 @@ function importAsOverwrite(wordsData, description, importedTagRegistry) {
         versionControl.createVersion(words, description || `Overwrite import (${processed.length} words)`);
     }
     renderWords();
+    updateHistoryButtonLabel();
     showStatus(`Overwrite imported ${processed.length} words as new branch`, 'success');
 }
 
@@ -3154,6 +3156,7 @@ function importWithVersionHistory(importedData) {
     _applyImportedTagRegistry(importedData.tagRegistry);
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
     renderWords();
+    updateHistoryButtonLabel();
     showStatus(`Forked: imported ${importedVersionCount} version(s) as new branch`, 'success');
 }
 
@@ -3175,6 +3178,7 @@ function importReplaceWithVersionHistory(importedData) {
     }
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
     renderWords();
+    updateHistoryButtonLabel();
     showStatus(`Replaced: imported ${versionControl.versions.size} version(s)`, 'success');
 }
 
@@ -3486,6 +3490,7 @@ function openSettingsModal() {
         });
     });
 
+    updateHistoryButtonLabel();
     document.getElementById('settingsModal').classList.add('active');
 }
 
