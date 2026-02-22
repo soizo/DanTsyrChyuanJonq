@@ -599,9 +599,12 @@ const DEFAULT_APP_SETTINGS = {
 };
 
 function createProjectId() {
-    return crypto.randomUUID
-        ? crypto.randomUUID()
-        : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+    const adj  = ['bold','calm','cool','dark','fast','gold','keen','lime','mint','neat','pink','pure','sage','slim','soft','warm','wild','grim','rosy','teal'];
+    const noun = ['axe','bay','bee','cat','elk','fen','fox','gem','ivy','jay','oak','owl','pea','ray','rye','sea','sky','tern','dew','cod'];
+    const a = adj[Math.floor(Math.random() * adj.length)];
+    const n = noun[Math.floor(Math.random() * noun.length)];
+    const num = String(Math.floor(Math.random() * 90) + 10);
+    return `${a}-${n}-${num}`;
 }
 
 function setProjectId(id) {
@@ -3159,6 +3162,9 @@ function importReplaceWithVersionHistory(importedData) {
     const resolvedData = currentVersion ? versionControl.resolveData(versionControl.currentId) : null;
     words = resolvedData ? JSON.parse(JSON.stringify(resolvedData)) : processed;
     _applyImportedTagRegistry(importedData.tagRegistry);
+    if (importedData.projectId) {
+        setProjectId(importedData.projectId);
+    }
     localStorage.setItem('wordMemoryData', JSON.stringify(words));
     renderWords();
     showStatus(`Replaced: imported ${versionControl.versions.size} version(s)`, 'success');
