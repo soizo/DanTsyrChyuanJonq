@@ -1480,6 +1480,13 @@ window.onload = function() {
     loadTagRegistry();
     migrateStringTagsToRegistry();
     appSettings = loadAppSettings();
+    warmCoreAssets().finally(() => {
+        _initActionSounds();
+        if (_dingAudio) {
+            _dingAudio.src = getPreloadedAssetURL('assets/ding.mp3');
+            _dingAudio.preload = 'auto';
+        }
+    });
 
     // Initialize version control
     versionControl = new VersionControl(50);
@@ -3527,11 +3534,11 @@ function _initActionSounds() {
         putActionSoundAudio = null;
     } else {
         if (!deleteActionSoundAudio) {
-            deleteActionSoundAudio = new Audio('assets/delete.mp3');
+            deleteActionSoundAudio = new Audio(getPreloadedAssetURL('assets/delete.mp3'));
             deleteActionSoundAudio.preload = 'auto';
         }
         if (!putActionSoundAudio) {
-            putActionSoundAudio = new Audio('assets/put.mp3');
+            putActionSoundAudio = new Audio(getPreloadedAssetURL('assets/put.mp3'));
             putActionSoundAudio.preload = 'auto';
         }
     }
@@ -4763,7 +4770,7 @@ let _dingAudio = null;
 
 function _playDing() {
     if (!_dingAudio) {
-        _dingAudio = new Audio('assets/ding.mp3');
+        _dingAudio = new Audio(getPreloadedAssetURL('assets/ding.mp3'));
         _dingAudio.preload = 'auto';
     }
     try {
@@ -4820,7 +4827,7 @@ function openQuizSetup() {
     // Preload pronunciation for all quiz pool words in the background
     if (appSettings.audioPreloadEnabled) {
         const pool = _getQuizPool();
-        pool.forEach(w => preloadAudioForWord(w.word));
+        pool.forEach(w => queueWordAudioPreload(w.word));
     }
 }
 
@@ -4899,9 +4906,9 @@ function _showQuizQuestion() {
 
     // Preload audio for current word (and next)
     if (appSettings.audioPreloadEnabled) {
-        preloadAudioForWord(w.word);
+        queueWordAudioPreload(w.word);
         const next = quizState.words[quizState.currentIndex + 1];
-        if (next) preloadAudioForWord(next.word);
+        if (next) queueWordAudioPreload(next.word);
     }
 
     document.getElementById('quizProgress').textContent = `${current} / ${total}`;
@@ -5086,6 +5093,11 @@ function _showAnswerFeedback(correct, correctWord) {
         const revealWord = document.getElementById('quizRevealWord');
         revealRow.style.display = '';
         revealWord.textContent = correctWord;
+        // Replay pronunciation once on wrong answer so user can hear it again immediately.
+        setTimeout(() => {
+            if (!quizState) return;
+            pronounceQuizWord();
+        }, 120);
     }
 
     if (correct) _playDing();
