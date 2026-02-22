@@ -2864,32 +2864,6 @@ body.is-resizing-layout * {
 	text-decoration: line-through;
 }
 
-@media (prefers-color-scheme: dark) {
-	.quiz-result-area.quiz-correct {
-		color: #8fc87e;
-	}
-	.quiz-result-area.quiz-wrong {
-		color: #e08b88;
-	}
-	.quiz-end-label-wrong {
-		color: #e08b88;
-	}
-	.quiz-end-label-correct {
-		color: #8fc87e;
-	}
-	.quiz-end-word-wrong {
-		color: #e08b88;
-	}
-	.quiz-end-word-correct {
-		color: #8fc87e;
-	}
-	.quiz-choice-btn.quiz-choice-correct {
-		border-color: #8fc87e;
-	}
-	.quiz-choice-btn.quiz-choice-wrong {
-		border-color: #e08b88;
-	}
-}
 
 /* ========================================
    Print
